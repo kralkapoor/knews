@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"
+  xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>RNZ Politics Headlines</title>
+    <description>The Latest Politics headlines from RNZ News</description>
+    <link>https://www.rnz.co.nz/news/political</link>
+    <copyright>Radio New Zealand</copyright>
+    <ttl>60</ttl>
+    <atom:link rel="self" type="application/rss+xml" href="https://www.rnz.co.nz/rss/political.xml"/>
+    <item>
+      <title>Government seeks urgent advice on how to protect Auckland rockpools</title>
+      <description>
+        <![CDATA[Whangaparāoa residents claim visitors have stripped local rockpools bare of sealife.]]>
+      </description>
+      <pubDate>Sun, 18 Jan 2026 19:25:50 +1300</pubDate>
+      <link>https://www.rnz.co.nz/news/political/584370/government-seeks-urgent-advice-on-how-to-protect-auckland-rockpools</link>
+      <guid isPermaLink="false">05a72d4bc4026f8039e7417f6a56dfc86c099a36</guid>
+    </item>
+    <item>
+      <title>Mourners gather to remember Sir Tim Shadbolt at funeral</title>
+      <description>
+        <![CDATA[Sir Tim is being remembered as a man who always chose to see the best in every situation and the person in every person]]>
+      </description>
+      <pubDate>Fri, 16 Jan 2026 18:51:12 +1300</pubDate>
+      <link>https://www.rnz.co.nz/news/political/584188/mourners-gather-to-remember-sir-tim-shadbolt-at-funeral</link>
+      <guid isPermaLink="false">0151e0020e36d9080cb1d0e45c9d788dcdcbccfd</guid>
+    </item>
+    <item>
+      <title>First offshore oil and gas exploration permit since ban under official consideration</title>
+      <description>
+        <![CDATA[Australian firm EnZed Energy's application to explore a large block off the coast of south Taranaki will go to officials with no competing bids.]]>
+      </description>
+      <pubDate>Fri, 16 Jan 2026 17:08:17 +1300</pubDate>
+      <link>https://www.rnz.co.nz/news/political/584263/first-offshore-oil-and-gas-exploration-permit-since-ban-under-official-consideration</link>
+      <guid isPermaLink="false">eb24b138a236495c25e64452a0f6245b41b94763</guid>
+    </item>
+    <item>
+      <title>New Zealand vacates embassy in Iran as threat of violence escalates</title>
+      <description>
+        <![CDATA[Human rights groups estimate the death toll has reached over 2500 since protests against the regime began last month, and the US has threatened strikes.]]>
+      </description>
+      <pubDate>Fri, 16 Jan 2026 13:45:59 +1300</pubDate>
+      <link>https://www.rnz.co.nz/news/world/584245/new-zealand-vacates-embassy-in-iran-as-threat-of-violence-escalates</link>
+      <guid isPermaLink="false">e686fac93af33189e69e4a3040e606d5fc308980</guid>
+    </item>
+    <item>
+      <title>Skilled migrants on path to residency warned status may change</title>
+      <description>
+        <![CDATA[Migrants told their jobs were skilled may find that's no longer be the case.]]>
+      </description>
+      <pubDate>Fri, 16 Jan 2026 08:40:41 +1300</pubDate>
+      <link>https://www.rnz.co.nz/news/political/584175/skilled-migrants-on-path-to-residency-warned-status-may-change</link>
+      <guid isPermaLink="false">58f8b9ac8522e67d3d67826bade0cb5117b5dd89</guid>
+    </item>
+    <item>
+      <title>Health NZ confirms another major tech outage</title>
+      <description>
+        <![CDATA[A union says crumbling systems put staff and patients at risk, however, Health NZ disagrees.]]>
+      </description>
+      <pubDate>Fri, 16 Jan 2026 09:48:48 +1300</pubDate>
+      <link>https://www.rnz.co.nz/news/national/584179/health-nz-confirms-another-major-tech-outage</link>
+      <guid isPermaLink="false">a690b4b4d40d7d805a78dc190a574e80a10ca556</guid>
+    </item>
+    <item>
+      <title>Leaders to meet over tourists trashing Blue Spring</title>
+      <description>
+        <![CDATA[A councillor said tourists were clogging composting toilets with rubbish, throwing coins in the spring and parking dangerously on the roadside.]]>
+      </description>
+      <pubDate>Fri, 16 Jan 2026 09:35:17 +1300</pubDate>
+      <link>https://www.rnz.co.nz/news/political/584213/leaders-to-meet-over-tourists-trashing-blue-spring</link>
+      <guid isPermaLink="false">18fd935fb879b15999a5a88182d8d4fc0bf05afb</guid>
+    </item>
+    <item>
+      <title>Auckland councillors in the dark over government's housing intensification rethink</title>
+      <description>
+        <![CDATA[The coalition is taking another look at housing intensification plans in Auckland after pushback - but the mayor and councillors know nothing about it.]]>
+      </description>
+      <pubDate>Fri, 16 Jan 2026 20:12:07 +1300</pubDate>
+      <link>https://www.rnz.co.nz/news/political/584254/auckland-councillors-in-the-dark-over-government-s-housing-intensification-rethink</link>
+      <guid isPermaLink="false">0a62ef635e1bcb1cd78c4a80d792beaca5ec0fba</guid>
+    </item>
+    <item>
+      <title>Winston Peters off to Kiribati year after being snubbed</title>
+      <description>
+        <![CDATA[The Foreign Affairs Minister had said the government was rethinking development support after the country's president cancelled a visit here.]]>
+      </description>
+      <pubDate>Fri, 16 Jan 2026 10:23:33 +1300</pubDate>
+      <link>https://www.rnz.co.nz/news/national/584217/winston-peters-off-to-kiribati-year-after-being-snubbed</link>
+      <guid isPermaLink="false">8b6d87fd3a09698497ee1abbe46ffcde46c77cb4</guid>
+    </item>
+    <item>
+      <title>Election 2026: Labour proposes 'game-changing' streaming levy to fund local productions</title>
+      <description>
+        <![CDATA[The revenue would be reinvested into local productions.]]>
+      </description>
+      <pubDate>Thu, 15 Jan 2026 12:58:50 +1300</pubDate>
+      <link>https://www.rnz.co.nz/news/political/584114/election-2026-labour-proposes-game-changing-streaming-levy-to-fund-local-productions</link>
+      <guid isPermaLink="false">bcf9a36ad42c32fe3d27922a62d2b97768600a5a</guid>
+    </item>
+    <item>
+      <title>Conservation Minister says Blue Spring not a priority after councillor seeks funds to protect site</title>
+      <description>
+        <![CDATA[The minister suggested councils look options they might have at their "fingertips" to generate revenue, such as car parking charges.]]>
+      </description>
+      <pubDate>Thu, 15 Jan 2026 10:34:10 +1300</pubDate>
+      <link>https://www.rnz.co.nz/news/political/584108/conservation-minister-says-blue-spring-not-a-priority-after-councillor-seeks-funds-to-protect-site</link>
+      <guid isPermaLink="false">b41b35e89350194d75658da83f976f63dae991dd</guid>
+    </item>
+    <item>
+      <title>Education ministry failure meant murdered children's disappearance went unnoticed for years</title>
+      <description>
+        <![CDATA[Yuna and Minu Jo were found in suitcases after being murdered by their mother.]]>
+      </description>
+      <pubDate>Thu, 15 Jan 2026 08:32:07 +1300</pubDate>
+      <link>https://www.rnz.co.nz/news/political/584095/education-ministry-failure-meant-murdered-children-s-disappearance-went-unnoticed-for-years</link>
+      <guid isPermaLink="false">9814b956cc4722246aa8e4bcce7b21a1169b97cd</guid>
+    </item>
+    <item>
+      <title>Ministry of Defence seeks advice for plan to have drones scour Pacific</title>
+      <description>
+        <![CDATA[The work is attached to its long-range drone project in the ministry's capability plan which has an indicative cost of between $100 million and $300m.]]>
+      </description>
+      <pubDate>Thu, 15 Jan 2026 05:41:07 +1300</pubDate>
+      <link>https://www.rnz.co.nz/news/political/584070/ministry-of-defence-seeks-advice-for-plan-to-have-drones-scour-pacific</link>
+      <guid isPermaLink="false">83f9e8eb808696c3509052afb3448f161fc05bf7</guid>
+    </item>
+    <item>
+      <title>Manage My Health ignored warning about lax security system - cyber-security expert</title>
+      <description>
+        <![CDATA[IT experts allege the health portal ignored warnings about vulnerabilities for years - but the regulatory vacuum meant it wasn't required to take action.]]>
+      </description>
+      <pubDate>Thu, 15 Jan 2026 05:35:19 +1300</pubDate>
+      <link>https://www.rnz.co.nz/news/national/584067/manage-my-health-ignored-warning-about-lax-security-system-cyber-security-expert</link>
+      <guid isPermaLink="false">30f77a1625713c35143c4f4945645d53c7ed8764</guid>
+    </item>
+    <item>
+      <title>Cyber-security expert launches petition to Parliament calling for harsher penalties for privacy breaches</title>
+      <description>
+        <![CDATA[It comes in the wake of the major Manage My Health data breach.]]>
+      </description>
+      <pubDate>Thu, 15 Jan 2026 07:57:42 +1300</pubDate>
+      <link>https://www.rnz.co.nz/news/political/584086/cyber-security-expert-launches-petition-to-parliament-calling-for-harsher-penalties-for-privacy-breaches</link>
+      <guid isPermaLink="false">b753428435816949c494ab352bdeba8afc087fb1</guid>
+    </item>
+    <item>
+      <title>Watch: Ministers mark start of new granny flats rules</title>
+      <description>
+        <![CDATA[The new rules allow a small dwelling with a simple design of up to 70 square metres to be built without a resource consent, and are in effect from today.]]>
+      </description>
+      <pubDate>Thu, 15 Jan 2026 12:54:12 +1300</pubDate>
+      <link>https://www.rnz.co.nz/news/national/584100/watch-ministers-mark-start-of-new-granny-flats-rules</link>
+      <guid isPermaLink="false">314b04f7afa65f9f5a9a8cae8d0406c521bf58e2</guid>
+    </item>
+  </channel>
+</rss>

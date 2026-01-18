@@ -1,6 +1,7 @@
 package rss
 
 import (
+	"encoding/xml"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,12 +11,12 @@ import (
 
 func listFeeds() []string {
 	feeds := []string{"https://www.rnz.co.nz/rss/political"}
-	fmt.Printf("Configured feeds are: %v",feeds)
+	fmt.Printf("Configured feeds are: %v\n***\n\n",feeds)
 	return feeds
 }
 
 // http get request to the target feed
-func getFeed(feed string) string {
+func getFeed(feed string) []byte {
 	resp, err := http.Get(feed)
 	if err != nil {
 		fmt.Println("could not get the feed for some reason")
@@ -36,16 +37,25 @@ func getFeed(feed string) string {
 	// todo handle any errors if it cannot reach eof
 
 	// convert the byte slice into a string so that it's human readable
-	bodyString := string(bodyBytes)
-	fmt.Println(bodyString)
+	bodyString := bodyBytes
+	fmt.Println(string(bodyString))
 	return bodyString
 }
 
 // get xml from response
 
-func parseXmlResponse(resp string) string {
+func parseXmlResponse(resp []byte) (Rss, error) {
+
+	// assign new rss var of type Rss
+	// it's defined separately because we will unmarshal the xml data slice into it via memory pointer
+	var rss Rss
+	err := xml.Unmarshal(resp, &rss)
 	
-	return parsedResponse
+	if err != nil {
+		return Rss{}, err
+	}
+
+	return rss, nil
 }
 
 // parse xml into a struct
