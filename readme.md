@@ -29,3 +29,11 @@ gate behind reverse proxy auth for simple security
 create new minimal user on server
 
 web terminal?
+
+### traditional frontend
+
+supplementary rest api
+
+create ad-free frontend? astro js?
+
+
