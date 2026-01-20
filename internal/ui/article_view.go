@@ -132,8 +132,8 @@ func (av *ArticleView) ShowArticle(art *article.Article) {
 	builder.WriteString(fmt.Sprintf("[::b]%s[::-]\n\n", art.Title))
 
 	// Metadata
-	if art.Author.Name != "" {
-		builder.WriteString(fmt.Sprintf("[gray]By %s[white]\n", art.Author.Name))
+	if art.Author != "" {
+		builder.WriteString(fmt.Sprintf("[gray]By %s[white]\n", art.Author))
 	}
 	if !art.PublishedAt.IsZero() {
 		builder.WriteString(fmt.Sprintf("[gray]%s[white]\n", art.PublishedAt.Format("Monday, 02 January 2006")))
@@ -146,30 +146,8 @@ func (av *ArticleView) ShowArticle(art *article.Article) {
 	builder.WriteString(strings.Repeat("─", 60))
 	builder.WriteString("\n\n")
 
-	// Content blocks
-	for _, block := range art.Content {
-		switch block.Type {
-		case article.BlockTypeHeading:
-			builder.WriteString(fmt.Sprintf("[::b]%s[::-]\n\n", block.Content))
-		case article.BlockTypeQuote:
-			builder.WriteString(fmt.Sprintf("[gray]> %s[white]\n\n", block.Content))
-		case article.BlockTypeParagraph:
-			builder.WriteString(block.Content)
-			builder.WriteString("\n\n")
-		default:
-			builder.WriteString(block.Content)
-			builder.WriteString("\n\n")
-		}
-	}
-
-	// Tags
-	if len(art.Tags) > 0 {
-		builder.WriteString(strings.Repeat("─", 60))
-		builder.WriteString("\n\n")
-		builder.WriteString("[gray]Tags: ")
-		builder.WriteString(strings.Join(art.Tags, ", "))
-		builder.WriteString("[white]\n")
-	}
+	// Content
+	builder.WriteString(art.Content)
 
 	av.textView.SetText(builder.String())
 	av.textView.ScrollToBeginning()
