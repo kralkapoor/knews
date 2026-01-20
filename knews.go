@@ -1,28 +1,36 @@
 package main
 
 import (
-	"fmt"
 	"log"
+	"time"
 
-	"github.com/kralkapoor/knews/internal/config"
+	"github.com/kralkapoor/knews/internal/article"
 	"github.com/kralkapoor/knews/internal/rss"
+	"github.com/kralkapoor/knews/internal/ui"
 )
 
-var feedConfiguration = config.GetTestFeedConfiguration()
+const (
+	feedTimeout    = 10 * time.Second
+	articleTimeout = 15 * time.Second
+	maxWorkers     = 5
+)
 
 func main() {
-	fmt.Println("What's going on out there?")
+	// Initialize RSS feed client and fetcher
+	feedClient := rss.NewFeedClient(feedTimeout)
+	feedFetcher := rss.NewFeedFetcher(feedClient, maxWorkers)
 
-	// get xml response as bytes
-	testFeedUri := feedConfiguration.Providers[0].Feeds[0]
-	xmlBytes := rss.GetUriBytes(testFeedUri)
-	
-	// unmarshal xml response into a struct
-	rss, error := rss.ParseXmlResponse(xmlBytes)
-	if error != nil {
-		log.Fatal(error)
+	// Initialize article parser registry with RNZ parser
+	parserRegistry := article.NewParserRegistry()
+	parserRegistry.Register(article.NewRNZParser())
+
+	// Initialize article fetcher
+	articleFetcher := article.NewArticleFetcher(parserRegistry, articleTimeout)
+
+	// Create and run the UI application
+	app := ui.NewApp(feedFetcher, articleFetcher)
+
+	if err := app.Run(); err != nil {
+		log.Fatalf("Error running application: %v", err)
 	}
-
-	fmt.Println(rss)
-	
 }

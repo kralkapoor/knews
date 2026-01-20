@@ -1,10 +1,6 @@
 package config
 
+// FeedConfiguration holds the overall feed configuration.
 type FeedConfiguration struct {
-	Providers []Provider 
-}
-
-type Provider struct {
-	Name string
-	Feeds []string
+	Providers []Provider
 }

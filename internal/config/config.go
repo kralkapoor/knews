@@ -1,10 +1,6 @@
 package config
 
+// GetTestFeedConfiguration returns a test configuration for development purposes.
 func GetTestFeedConfiguration() FeedConfiguration {
-	rnzProvider := Provider{
-		Name: "RNZ",
-		Feeds: []string{"http://rnz.co.nz/rss/political"}, 
-	}
-
-	return FeedConfiguration{Providers: []Provider{rnzProvider}}
+	return FeedConfiguration{Providers: []Provider{Providers["RNZ"]}}
 }
