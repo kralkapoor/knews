@@ -10,9 +10,8 @@ import (
 )
 
 const (
-	feedTimeout    = 10 * time.Second
-	articleTimeout = 15 * time.Second
-	maxWorkers     = 5
+	feedTimeout = 10 * time.Second
+	maxWorkers  = 5
 )
 
 func main() {
@@ -25,7 +24,7 @@ func main() {
 	parserRegistry.Register(article.NewRNZParser())
 
 	// Initialize article fetcher
-	articleFetcher := article.NewArticleFetcher(parserRegistry, articleTimeout)
+	articleFetcher := article.NewArticleFetcher(parserRegistry)
 
 	// Create and run the UI application
 	app := ui.NewApp(feedFetcher, articleFetcher)
