@@ -8,15 +8,11 @@ import (
 
 const defaultMaxWorkers = 5
 
-// FeedFetcher provides concurrent fetching of multiple RSS feeds using a
-// worker pool pattern for efficient resource utilization.
 type FeedFetcher struct {
 	client     *FeedClient
 	maxWorkers int
 }
 
-// NewFeedFetcher creates a new FeedFetcher with the specified client and
-// maximum number of concurrent workers.
 func NewFeedFetcher(client *FeedClient, maxWorkers int) *FeedFetcher {
 	if maxWorkers <= 0 {
 		maxWorkers = defaultMaxWorkers
@@ -28,23 +24,20 @@ func NewFeedFetcher(client *FeedClient, maxWorkers int) *FeedFetcher {
 	}
 }
 
-// FetchAll concurrently fetches all feeds from the provided requests and
-// returns results for each. The operation respects context cancellation.
 func (ff *FeedFetcher) FetchAll(ctx context.Context, requests []FeedRequest) []FeedResult {
 	if len(requests) == 0 {
 		return nil
 	}
 
 	results := make([]FeedResult, len(requests))
+
 	requestChannel := make(chan int, len(requests))
+
 	var waitGroup sync.WaitGroup
 
-	workerCount := ff.maxWorkers
-	if len(requests) < workerCount {
-		workerCount = len(requests)
-	}
+	workerCount := min(ff.maxWorkers, len(requests))
 
-	for workerIndex := 0; workerIndex < workerCount; workerIndex++ {
+	for range workerCount {
 		waitGroup.Add(1)
 		go ff.worker(ctx, requests, results, requestChannel, &waitGroup)
 	}

@@ -2,21 +2,19 @@ package main
 
 import (
 	"log"
-	"time"
 
 	"github.com/kralkapoor/knews/internal/article"
 	"github.com/kralkapoor/knews/internal/rss"
 	"github.com/kralkapoor/knews/internal/ui"
 )
 
-const (
-	feedTimeout = 10 * time.Second
-	maxWorkers  = 5
-)
+const maxWorkers = 5
 
 func main() {
-	// Initialize RSS feed client and fetcher
-	feedClient := rss.NewFeedClient(feedTimeout)
+	// Initialize RSS feed client and fetcher.
+	// FeedClient handles individual HTTP requests, FeedFetcher coordinates
+	// fetching multiple feeds concurrently using a worker pool.
+	feedClient := rss.NewFeedClient()
 	feedFetcher := rss.NewFeedFetcher(feedClient, maxWorkers)
 
 	// Initialize article parser registry with RNZ parser
