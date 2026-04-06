@@ -23,8 +23,8 @@ func GetProvider(name string) Provider {
 // RNZFeeds defines the available RSS feed categories from Radio New Zealand.
 // Each key is a human-readable category name, and the value is the feed URL.
 var RNZFeeds = map[string]string{
-	"Business":    "https://www.rnz.co.nz/rss/business.xml",
-	"Country":     "https://www.rnz.co.nz/rss/country.xml",
+	"Business": "https://www.rnz.co.nz/rss/business.xml",
+	// "Country":     "https://www.rnz.co.nz/rss/country.xml",
 	"Environment": "https://www.rnz.co.nz/rss/environment.xml",
 	"Identity":    "https://www.rnz.co.nz/rss/identity.xml",
 	"In Depth":    "https://www.rnz.co.nz/rss/in-depth.xml",
