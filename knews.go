@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/kralkapoor/knews/internal/article"
 	"github.com/kralkapoor/knews/internal/rss"
 	"github.com/kralkapoor/knews/internal/ui"
@@ -25,9 +26,10 @@ func main() {
 	articleFetcher := article.NewArticleFetcher(parserRegistry)
 
 	// Create and run the UI application
-	app := ui.NewApp(feedFetcher, articleFetcher)
+	model := ui.NewModel(feedFetcher, articleFetcher)
+	p := tea.NewProgram(model, tea.WithAltScreen())
 
-	if err := app.Run(); err != nil {
+	if _, err := p.Run(); err != nil {
 		log.Fatalf("Error running application: %v", err)
 	}
 }

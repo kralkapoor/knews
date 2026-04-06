@@ -6,167 +6,186 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/gdamore/tcell/v2"
+	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/kralkapoor/knews/internal/article"
-	"github.com/rivo/tview"
 )
 
-// ArticleView represents the full article display view.
-type ArticleView struct {
-	layout     *tview.Flex
-	textView   *tview.TextView
-	app        *App
+type articleModel struct {
+	viewport   viewport.Model
 	currentURL string
+	title      string
+	width      int
+	height     int
 }
 
-// NewArticleView creates a new ArticleView component.
-func NewArticleView(app *App) *ArticleView {
-	av := &ArticleView{
-		textView: tview.NewTextView(),
-		app:      app,
+func newArticleModel() articleModel {
+	vp := viewport.New(80, 20)
+	return articleModel{
+		viewport: vp,
+	}
+}
+
+// contentWidth calculates the readable content width: capped at 80 columns
+// and no more than 3/4 of the terminal width, for comfortable reading.
+func (a *articleModel) contentWidth() int {
+	maxWidth := a.width * 3 / 4
+	if maxWidth > 80 {
+		maxWidth = 80
+	}
+	if maxWidth < 40 {
+		maxWidth = a.width - 4
+	}
+	if maxWidth < 1 {
+		maxWidth = 1
+	}
+	return maxWidth
+}
+
+func (a *articleModel) setSize(width, height int) {
+	a.width = width
+	a.height = height
+
+	// Reserve 1 line for the status bar, 2 for the box borders
+	vpHeight := height - 3
+	if vpHeight < 1 {
+		vpHeight = 1
+	}
+	a.viewport.Width = a.contentWidth()
+	a.viewport.Height = vpHeight
+}
+
+func (a *articleModel) showLoading(title string) {
+	a.title = truncateTitle(title, 60)
+	a.currentURL = ""
+	a.viewport.SetContent(keyStyle.Render("\n\nLoading article..."))
+	a.viewport.GotoTop()
+}
+
+func (a *articleModel) showError(title string, err error) {
+	a.title = truncateTitle(title, 60)
+	a.currentURL = ""
+	content := fmt.Sprintf("\n\n%s\n\n%s",
+		errorStyle.Render("Error loading article:"),
+		err.Error(),
+	)
+	a.viewport.SetContent(content)
+	a.viewport.GotoTop()
+}
+
+func (a *articleModel) showArticle(art *article.Article) {
+	a.title = truncateTitle(art.Title, 60)
+	a.currentURL = art.URL
+
+	contentWidth := a.contentWidth()
+	dividerWidth := contentWidth
+	if dividerWidth > 60 {
+		dividerWidth = 60
 	}
 
-	av.textView.SetDynamicColors(true).
-		SetWordWrap(true).
-		SetScrollable(true)
-	av.textView.SetBorder(true).
-		SetBorderColor(tcell.ColorDarkCyan)
+	var b strings.Builder
 
-	// Create layout with status bar
-	statusBar := tview.NewTextView().
-		SetDynamicColors(true).
-		SetText(" [yellow]q[white] Back | [yellow]o[white] Open in browser | [yellow]j/k[white] Scroll")
-
-	av.layout = tview.NewFlex().
-		SetDirection(tview.FlexRow).
-		AddItem(av.textView, 0, 1, true).
-		AddItem(statusBar, 1, 0, false)
-
-	return av
-}
-
-// HandleInput processes keyboard input for the article view.
-func (av *ArticleView) HandleInput(event *tcell.EventKey) *tcell.EventKey {
-	switch event.Key() {
-	case tcell.KeyRune:
-		switch event.Rune() {
-		case 'q':
-			av.app.closeArticle()
-			return nil
-		case 'o':
-			av.openInBrowser()
-			return nil
-		case 'j':
-			row, col := av.textView.GetScrollOffset()
-			av.textView.ScrollTo(row+1, col)
-			return nil
-		case 'k':
-			row, col := av.textView.GetScrollOffset()
-			if row > 0 {
-				av.textView.ScrollTo(row-1, col)
-			}
-			return nil
-		case 'g':
-			av.textView.ScrollToBeginning()
-			return nil
-		case 'G':
-			av.textView.ScrollToEnd()
-			return nil
-		}
-	case tcell.KeyEscape:
-		av.app.closeArticle()
-		return nil
-	case tcell.KeyDown:
-		row, col := av.textView.GetScrollOffset()
-		av.textView.ScrollTo(row+1, col)
-		return nil
-	case tcell.KeyUp:
-		row, col := av.textView.GetScrollOffset()
-		if row > 0 {
-			av.textView.ScrollTo(row-1, col)
-		}
-		return nil
-	case tcell.KeyPgDn:
-		row, col := av.textView.GetScrollOffset()
-		av.textView.ScrollTo(row+10, col)
-		return nil
-	case tcell.KeyPgUp:
-		row, col := av.textView.GetScrollOffset()
-		if row > 10 {
-			av.textView.ScrollTo(row-10, col)
-		} else {
-			av.textView.ScrollTo(0, col)
-		}
-		return nil
-	case tcell.KeyHome:
-		av.textView.ScrollToBeginning()
-		return nil
-	case tcell.KeyEnd:
-		av.textView.ScrollToEnd()
-		return nil
-	}
-	return event
-}
-
-// ShowLoading displays a loading message while fetching the article.
-func (av *ArticleView) ShowLoading(title string) {
-	av.textView.SetTitle(" " + truncateTitle(title, 60) + " ")
-	av.textView.SetText("\n\n[yellow]Loading article...[white]")
-	av.textView.ScrollToBeginning()
-}
-
-// ShowError displays an error message when article fetching fails.
-func (av *ArticleView) ShowError(title string, err error) {
-	av.textView.SetTitle(" " + truncateTitle(title, 60) + " ")
-	av.textView.SetText(fmt.Sprintf("\n\n[red]Error loading article:[white]\n\n%s", err.Error()))
-}
-
-// ShowArticle displays the full article content.
-func (av *ArticleView) ShowArticle(art *article.Article) {
-	av.currentURL = art.URL
-	av.textView.SetTitle(" " + truncateTitle(art.Title, 60) + " ")
-
-	var builder strings.Builder
+	// Leading whitespace for breathing room
+	b.WriteString("\n")
 
 	// Title
-	builder.WriteString(fmt.Sprintf("[::b]%s[::-]\n\n", art.Title))
+	b.WriteString(titleStyle.Render(art.Title))
+	b.WriteString("\n\n")
 
 	// Metadata
 	if art.Author != "" {
-		builder.WriteString(fmt.Sprintf("[gray]By %s[white]\n", art.Author))
+		b.WriteString(metadataStyle.Render("By " + art.Author))
+		b.WriteString("\n")
 	}
 	if !art.PublishedAt.IsZero() {
-		builder.WriteString(fmt.Sprintf("[gray]%s[white]\n", art.PublishedAt.Format("Monday, 02 January 2006")))
+		b.WriteString(metadataStyle.Render(art.PublishedAt.Format("Monday, 02 January 2006")))
+		b.WriteString("\n")
 	}
 	if art.Source != "" {
-		builder.WriteString(fmt.Sprintf("[gray]Source: %s[white]\n", art.Source))
+		b.WriteString(metadataStyle.Render("Source: " + art.Source))
+		b.WriteString("\n")
 	}
 
-	builder.WriteString("\n")
-	builder.WriteString(strings.Repeat("─", 60))
-	builder.WriteString("\n\n")
+	b.WriteString("\n")
+	b.WriteString(metadataStyle.Render(strings.Repeat("─", dividerWidth)))
+	b.WriteString("\n\n")
 
-	// Content
-	builder.WriteString(art.Content)
+	// Content — add extra blank lines between paragraphs for readability.
+	// go-readability's RenderText uses \n\n for paragraph breaks; we widen
+	// those to \n\n\n so paragraphs have visible separation.
+	content := strings.ReplaceAll(art.Content, "\n\n", "\n\n\n")
+	b.WriteString(content)
 
-	av.textView.SetText(builder.String())
-	av.textView.ScrollToBeginning()
+	// Trailing whitespace so user can scroll past the end comfortably
+	b.WriteString("\n\n")
+
+	// Word-wrap the entire content to the viewport width so lines don't get
+	// clipped. The viewport itself doesn't wrap text — it just clips.
+	wrapped := lipgloss.NewStyle().Width(contentWidth).Render(b.String())
+	a.viewport.SetContent(wrapped)
+	a.viewport.GotoTop()
 }
 
-// openInBrowser opens the current article URL in the default browser.
-func (av *ArticleView) openInBrowser() {
-	if av.currentURL == "" {
+func (a articleModel) Update(msg tea.Msg) (articleModel, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "q", "esc":
+			return a, func() tea.Msg { return closeArticleMsg{} }
+		case "o":
+			a.openInBrowser()
+			return a, nil
+		case "j", "down":
+			a.viewport.LineDown(1)
+			return a, nil
+		case "k", "up":
+			a.viewport.LineUp(1)
+			return a, nil
+		case "g", "home":
+			a.viewport.GotoTop()
+			return a, nil
+		case "G", "end":
+			a.viewport.GotoBottom()
+			return a, nil
+		case "pgdown":
+			a.viewport.HalfViewDown()
+			return a, nil
+		case "pgup":
+			a.viewport.HalfViewUp()
+			return a, nil
+		}
+	}
+
+	var cmd tea.Cmd
+	a.viewport, cmd = a.viewport.Update(msg)
+	return a, cmd
+}
+
+func (a articleModel) View() string {
+	// Center the viewport content horizontally within the full-width box
+	vpView := lipgloss.PlaceHorizontal(a.width-2, lipgloss.Center, a.viewport.View())
+	box := titledBox(vpView, a.title, a.width, a.height-1, colorDarkCyan)
+
+	// Status bar
+	status := statusText(" ", "q", " Back │ ", "o", " Open in browser │ ", "j/k", " Scroll")
+
+	return lipgloss.JoinVertical(lipgloss.Left, box, status)
+}
+
+func (a *articleModel) openInBrowser() {
+	if a.currentURL == "" {
 		return
 	}
 
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "linux":
-		cmd = exec.Command("xdg-open", av.currentURL)
+		cmd = exec.Command("xdg-open", a.currentURL)
 	case "darwin":
-		cmd = exec.Command("open", av.currentURL)
+		cmd = exec.Command("open", a.currentURL)
 	case "windows":
-		cmd = exec.Command("cmd", "/c", "start", av.currentURL)
+		cmd = exec.Command("cmd", "/c", "start", a.currentURL)
 	default:
 		return
 	}
