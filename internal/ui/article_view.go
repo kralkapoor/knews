@@ -193,11 +193,17 @@ func (a *articleModel) openInBrowser() {
 	cmd.Start()
 }
 
-// truncateTitle shortens a title string for display in the border.
+// truncateTitle shortens a title string for display in the border. It counts
+// runes rather than bytes so multi-byte characters (e.g. the macrons in te reo
+// Māori) are never split mid-character.
 func truncateTitle(s string, maxLength int) string {
 	s = strings.TrimSpace(s)
-	if len(s) <= maxLength {
+	runes := []rune(s)
+	if len(runes) <= maxLength {
 		return s
 	}
-	return s[:maxLength-3] + "..."
+	if maxLength < 3 {
+		return string(runes[:maxLength])
+	}
+	return string(runes[:maxLength-3]) + "..."
 }

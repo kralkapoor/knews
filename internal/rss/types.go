@@ -28,11 +28,11 @@ type Item struct {
 // FeedResult encapsulates the result of fetching a single RSS feed, including
 // success data and any error that occurred during the fetch operation.
 type FeedResult struct {
-	Feed       Rss
-	SourceURL  string
-	FeedName   string
-	FetchedAt  time.Time
-	Error      error
+	Feed      Rss
+	SourceURL string
+	FeedName  string
+	FetchedAt time.Time
+	Error     error
 }
 
 // FeedRequest represents a request to fetch a feed with its metadata.

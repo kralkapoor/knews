@@ -293,13 +293,19 @@ func (m *mainModel) toggleFocus() {
 	}
 }
 
-// truncateString shortens a string to the specified length, adding ellipsis if needed.
+// truncateString shortens a string to maxLength runes, adding an ellipsis if
+// needed. It counts runes rather than bytes so multi-byte characters (e.g. the
+// macrons in te reo Māori) are never split mid-character.
 func truncateString(s string, maxLength int) string {
 	s = strings.TrimSpace(s)
-	if len(s) <= maxLength {
+	runes := []rune(s)
+	if len(runes) <= maxLength {
 		return s
 	}
-	return s[:maxLength-3] + "..."
+	if maxLength < 3 {
+		return string(runes[:maxLength])
+	}
+	return string(runes[:maxLength-3]) + "..."
 }
 
 // formatPubDate parses and formats an RSS publication date string.
@@ -319,8 +325,8 @@ func formatPubDate(pubDate string) string {
 		}
 	}
 
-	if len(pubDate) > 16 {
-		return pubDate[:16]
+	if runes := []rune(pubDate); len(runes) > 16 {
+		return string(runes[:16])
 	}
 	return pubDate
 }
