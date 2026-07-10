@@ -1,28 +1,35 @@
 package main
 
 import (
-	"fmt"
 	"log"
 
-	"github.com/kralkapoor/knews/internal/config"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/kralkapoor/knews/internal/article"
 	"github.com/kralkapoor/knews/internal/rss"
+	"github.com/kralkapoor/knews/internal/ui"
 )
 
-var feedConfiguration = config.GetTestFeedConfiguration()
+const maxWorkers = 5
 
 func main() {
-	fmt.Println("What's going on out there?")
+	// Initialize RSS feed client and fetcher.
+	// FeedClient handles individual HTTP requests, FeedFetcher coordinates
+	// fetching multiple feeds concurrently using a worker pool.
+	feedClient := rss.NewFeedClient()
+	feedFetcher := rss.NewFeedFetcher(feedClient, maxWorkers)
 
-	// get xml response as bytes
-	testFeedUri := feedConfiguration.Providers[0].Feeds[0]
-	xmlBytes := rss.GetUriBytes(testFeedUri)
-	
-	// unmarshal xml response into a struct
-	rss, error := rss.ParseXmlResponse(xmlBytes)
-	if error != nil {
-		log.Fatal(error)
+	// Initialize article parser registry with RNZ parser
+	parserRegistry := article.NewParserRegistry()
+	parserRegistry.Register(article.NewRNZParser())
+
+	// Initialize article fetcher
+	articleFetcher := article.NewArticleFetcher(parserRegistry)
+
+	// Create and run the UI application
+	model := ui.NewModel(feedFetcher, articleFetcher)
+	p := tea.NewProgram(model, tea.WithAltScreen())
+
+	if _, err := p.Run(); err != nil {
+		log.Fatalf("Error running application: %v", err)
 	}
-
-	fmt.Println(rss)
-	
 }
