@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/kralkapoor/knews/internal/article"
 	"github.com/kralkapoor/knews/internal/rss"
 	"github.com/muesli/termenv"
 )
@@ -80,6 +81,23 @@ func TestContentWidth(t *testing.T) {
 		a := articleModel{width: tt.width}
 		if got := a.contentWidth(); got != tt.want {
 			t.Errorf("contentWidth() at width %d = %d, want %d", tt.width, got, tt.want)
+		}
+	}
+}
+
+func TestFormatArticleByline(t *testing.T) {
+	tests := []struct {
+		author, source string
+		wantByline     bool
+	}{
+		{"Jane Smith", "RNZ", true},
+		{"Stuff", "Stuff", false},
+		{"", "RNZ", false},
+	}
+	for _, tt := range tests {
+		out := formatArticle(&article.Article{Title: "T", Author: tt.author, Source: tt.source}, "", 60)
+		if got := strings.Contains(out, "By "); got != tt.wantByline {
+			t.Errorf("author %q, source %q: byline shown = %v, want %v", tt.author, tt.source, got, tt.wantByline)
 		}
 	}
 }

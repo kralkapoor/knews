@@ -1,0 +1,40 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <id>https://www.stuff.co.nz/rss?section=nz-news</id>
+  <title>Stuff - Nz News</title>
+  <link rel="self" href="https://www.stuff.co.nz/rss?section=nz-news"/>
+  <updated>2026-10-30T01:29:32Z</updated>
+  <entry>
+    <id>https://www.stuff.co.nz/business/361053141/tattoo-parlor-boss-told-traumatised-worker-harden-and-threatened-call-immigration</id>
+    <title>Boss ordered to pay $47k after visa threats and abusive texts</title>
+    <link href="https://www.stuff.co.nz/business/361053141/tattoo-parlor-boss-told-traumatised-worker-harden-and-threatened-call-immigration"/>
+    <published>2026-10-30T00:47:20Z</published>
+    <updated>2026-10-30T00:47:20Z</updated>
+    <summary>A Wellington employer who threatened to report a migrant tattoo artist to immigration after he took sick leave must pay $40,000 in compensation.</summary>
+    <author>
+      <name>Stuff</name>
+    </author>
+  </entry>
+  <entry>
+    <id>https://www.stuff.co.nz/business/361053140/builder-told-worker-sort-own-tax-over-visa-status-serious-work-fall</id>
+    <title>Builder told worker to sort own tax over visa status before serious work fall</title>
+    <link href="https://www.stuff.co.nz/business/361053140/builder-told-worker-sort-own-tax-over-visa-status-serious-work-fall"/>
+    <published>2026-10-30T00:39:52Z</published>
+    <updated>2026-10-30T00:39:52Z</updated>
+    <summary>Chenjia Ye fell heavily onto a roof beam while working for B&amp;D Pro Construction, which claimed his visa status meant he was a contractor.</summary>
+    <author>
+      <name>Stuff</name>
+    </author>
+  </entry>
+  <entry>
+    <id>https://www.stuff.co.nz/nz-news/361052854/snow-gales-and-thunderstorms-forecast-cold-front-hits-nz</id>
+    <title>Hello summer! Canterbury back in firing line for more thunderstorms</title>
+    <link href="https://www.stuff.co.nz/nz-news/361052854/snow-gales-and-thunderstorms-forecast-cold-front-hits-nz"/>
+    <published>2026-10-30T00:35:13Z</published>
+    <updated>2026-10-29T20:01:10Z</updated>
+    <summary>The weather system, embedded in an incoming flow, is moving across the northern South Island and southern North Island, bringing an active front throughout Friday.</summary>
+    <author>
+      <name>Poppy Clark</name>
+    </author>
+  </entry>
+</feed>

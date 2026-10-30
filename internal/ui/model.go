@@ -3,8 +3,10 @@ package ui
 
 import (
 	"context"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/kralkapoor/knews/internal/article"
 	"github.com/kralkapoor/knews/internal/config"
 	"github.com/kralkapoor/knews/internal/rss"
 )
@@ -90,20 +92,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cancelArticle()
 			m.cancelArticle = nil
 		}
-		switch {
-		case msg.err != nil:
-			m.articleView.showError(msg.err)
-		case msg.article != nil:
-			m.articleView.showArticle(msg.article)
+		if msg.err != nil || msg.article == nil {
+			// Fall back to what the feed says about the article.
+			m.articleView.showSummary(summaryArticle(msg.item, m.provider.Name), msg.err)
+			return m, nil
 		}
+		m.articleView.showArticle(msg.article)
 		return m, nil
 
 	// Screen transitions.
 	case providerSelectedMsg:
 		m.provider = msg.provider
-		m.main.setFeeds(msg.provider.Feeds)
+		m.main.setProvider(msg.provider)
 		m.activeScreen = screenMain
 		return m, m.fetchFeeds(false)
+
+	case backToProvidersMsg:
+		// Drop the results of any fetch still in flight.
+		m.feedReqID++
+		m.main.loading = false
+		m.activeScreen = screenSplash
+		return m, nil
 
 	case requestRefreshMsg:
 		if m.main.loading {
@@ -112,8 +121,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.fetchFeeds(true)
 
 	case openArticleMsg:
-		m.articleView.showLoading(msg.item)
 		m.activeScreen = screenArticle
+		if !m.provider.FullText {
+			m.articleView.showSummary(summaryArticle(msg.item, m.provider.Name), nil)
+			return m, nil
+		}
+		m.articleView.showLoading(msg.item)
 		return m, m.fetchArticle(msg.item)
 
 	case closeArticleMsg:
@@ -174,7 +187,7 @@ func (m *Model) fetchArticle(item rss.Item) tea.Cmd {
 	m.stopArticleFetch()
 	ctx, cancel := context.WithTimeout(context.Background(), articleTimeout)
 	m.cancelArticle = cancel
-	return fetchArticleCmd(ctx, m.articles, item.Link, m.articleReqID)
+	return fetchArticleCmd(ctx, m.articles, item, m.articleReqID)
 }
 
 // stopArticleFetch cancels the in-flight article fetch, if any, and makes
@@ -185,4 +198,18 @@ func (m *Model) stopArticleFetch() {
 		m.cancelArticle = nil
 	}
 	m.articleReqID++
+}
+
+// summaryArticle builds an article from what the feed says about it, for
+// providers whose pages can't be extracted or when extraction fails.
+func summaryArticle(item rss.Item, source string) *article.Article {
+	published, _ := item.Published()
+	return &article.Article{
+		URL:         item.Link,
+		Title:       strings.TrimSpace(item.Title),
+		Author:      strings.TrimSpace(item.Author),
+		Content:     item.Summary(),
+		PublishedAt: published,
+		Source:      source,
+	}
 }

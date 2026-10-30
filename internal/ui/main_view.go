@@ -111,6 +111,7 @@ func (d articleDelegate) Render(w io.Writer, m list.Model, index int, item list.
 }
 
 type mainModel struct {
+	provider    string
 	feedList    list.Model
 	articleList list.Model
 	focus       focusPanel
@@ -156,10 +157,12 @@ func (m *mainModel) setSize(width, height int) {
 	m.articleList.SetDelegate(articleDelegate{width: articleInner})
 }
 
-// setFeeds resets the view for a newly selected provider and lists its feeds.
-// The first feed is selected; its articles appear once setFeedResults is
-// called.
-func (m *mainModel) setFeeds(feeds []config.Feed) {
+// setProvider resets the view for a newly selected provider and lists its
+// feeds. The first feed is selected; its articles appear once setFeedResults
+// is called.
+func (m *mainModel) setProvider(p config.Provider) {
+	m.provider = p.Name
+	feeds := p.Feeds
 	items := make([]list.Item, len(feeds))
 	for i, f := range feeds {
 		items[i] = feedItem{name: f.Name}
@@ -207,7 +210,7 @@ func (m mainModel) status() string {
 	if err := m.feedResults[m.currentFeed].Err; err != nil {
 		return errorStyle.Render("Error loading "+m.currentFeed+": ") + err.Error()
 	}
-	hint := statusText("Press ", "?", " for help │ ", "q", " to quit")
+	hint := statusText("Press ", "?", " for help │ ", "Esc", " providers │ ", "q", " to quit")
 	if m.notice != "" {
 		return m.notice + " │ " + hint
 	}
@@ -233,6 +236,8 @@ func (m mainModel) Update(msg tea.Msg) (mainModel, tea.Cmd) {
 		return m, nil
 	case "q":
 		return m, tea.Quit
+	case "esc", "backspace":
+		return m, func() tea.Msg { return backToProvidersMsg{} }
 	case "?":
 		return m, func() tea.Msg { return showHelpMsg{} }
 	case "r":
@@ -265,7 +270,7 @@ func (m mainModel) Update(msg tea.Msg) (mainModel, tea.Cmd) {
 }
 
 func (m mainModel) View() string {
-	headerText := titleStyle.Render("Knews - NZ News Reader")
+	headerText := titleStyle.Render("Knews - " + m.provider)
 	headerContent := lipgloss.PlaceHorizontal(m.width-2, lipgloss.Center, headerText)
 	header := titledBox(headerContent, "", m.width, headerHeight, colorDarkCyan)
 

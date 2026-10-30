@@ -39,6 +39,7 @@ type feedsMsg struct {
 
 type articleMsg struct {
 	reqID   int
+	item    rss.Item
 	article *article.Article
 	err     error
 }
@@ -60,12 +61,12 @@ func fetchFeedsCmd(src feedSource, feeds []config.Feed, reqID int, refresh bool)
 	}
 }
 
-// fetchArticleCmd fetches the article at url. The caller owns ctx so it can
-// cancel the fetch when the user leaves the article view.
-func fetchArticleCmd(ctx context.Context, src articleSource, url string, reqID int) tea.Cmd {
+// fetchArticleCmd fetches the article item links to. The caller owns ctx so
+// it can cancel the fetch when the user leaves the article view.
+func fetchArticleCmd(ctx context.Context, src articleSource, item rss.Item, reqID int) tea.Cmd {
 	return func() tea.Msg {
-		art, err := src.Fetch(ctx, url)
-		return articleMsg{reqID: reqID, article: art, err: err}
+		art, err := src.Fetch(ctx, item.Link)
+		return articleMsg{reqID: reqID, item: item, article: art, err: err}
 	}
 }
 
@@ -100,6 +101,8 @@ type openArticleMsg struct {
 type showHelpMsg struct{}
 
 type closeArticleMsg struct{}
+
+type backToProvidersMsg struct{}
 
 type closeHelpMsg struct{}
 

@@ -1,6 +1,6 @@
 # Knews Architecture
 
-Knews is a terminal-based RSS news reader built in Go using the [Bubble Tea](https://github.com/charmbracelet/bubbletea) TUI framework. It currently supports RNZ (Radio New Zealand) feeds. Providers are configuration data, so adding a server-rendered news site needs no new code.
+Knews is a terminal-based RSS news reader built in Go using the [Bubble Tea](https://github.com/charmbracelet/bubbletea) TUI framework. It supports RNZ (Radio New Zealand) with full article text, and Stuff and the NZ Herald with headlines and feed summaries. Providers are configuration data, so adding a news site needs no new code.
 
 ## Table of Contents
 
@@ -26,7 +26,7 @@ graph TB
     end
 
     subgraph "internal/config"
-        config["Provider list<br/>Feeds in display order"]
+        config["Provider list<br/>Feeds in display order<br/>Full text or summaries"]
     end
 
     subgraph "internal/httpx"
@@ -34,7 +34,7 @@ graph TB
     end
 
     subgraph "internal/rss"
-        rss["Feed fetching & parsing<br/>Worker pool concurrency"]
+        rss["Feed fetching & parsing<br/>RSS 2.0 + Atom<br/>Worker pool concurrency"]
     end
 
     subgraph "internal/article"
@@ -62,7 +62,7 @@ graph TB
 |---------|---------|-------------|
 | `config` | Defines providers and their feeds | Static, ordered list |
 | `httpx` | One hardened HTTP GET shared by the fetchers | Injectable `*http.Client` |
-| `rss` | Fetches and parses RSS XML feeds concurrently | Worker pool |
+| `rss` | Fetches and parses RSS 2.0 and Atom feeds concurrently | Worker pool |
 | `article` | Fetches article HTML and extracts readable content | Parser registry |
 | `ui` | Terminal interface with screen-based navigation | Bubble Tea Model-Update-View |
 
@@ -81,11 +81,11 @@ knews/
     ├── httpx/
     │   └── get.go              # Get(), NewClient() — shared HTTP plumbing
     ├── rss/
-    │   ├── types.go            # RSS, Channel, Item (+ Published), FeedRequest, FeedResult
-    │   ├── parser.go           # Parse — XML decoding with charset support
+    │   ├── types.go            # RSS, Channel, Item (+ Published, Summary), FeedRequest, FeedResult
+    │   ├── parser.go           # Parse — RSS/Atom decoding with charset support
     │   ├── client.go           # Client — fetch + parse one feed
     │   ├── fetcher.go          # Fetcher — concurrent worker pool
-    │   └── testdata/           # RNZ feed fixture
+    │   └── testdata/           # RNZ, Herald (RSS) and Stuff (Atom) feed fixtures
     ├── article/
     │   ├── types.go            # Article struct
     │   ├── parser.go           # Parser interface, Registry
@@ -142,8 +142,9 @@ classDiagram
             +Items []Item
         }
         class Item {
-            +Title, Description, PubDate, Link, GUID string
+            +Title, Description, PubDate, Link, GUID, Author string
             +Published() time.Time, bool
+            +Summary() string
         }
         class FeedRequest {
             +Name string
@@ -233,7 +234,7 @@ sequenceDiagram
 
     User->>Splash: Enter
     Splash->>Root: providerSelectedMsg{provider}
-    Root->>Main: setFeeds(provider.Feeds)
+    Root->>Main: setProvider(provider)
     Note over Main: Resets results, cursors and focus,<br/>selects the first feed
     Root->>Root: feedReqID++, main.loading = true
     Root->>Cmd: fetchFeedsCmd(feeds, provider.Feeds, reqID)
@@ -252,6 +253,8 @@ sequenceDiagram
 Refresh (`r`) goes through the same path with `refresh: true`, which adds a "Feeds refreshed" notice. A refresh is ignored while a fetch is already in flight.
 
 ### Article Selection → Content Display
+
+For providers with `FullText: false` (Stuff, NZ Herald), opening an article makes no request at all: the root model builds an `Article` from the feed item (`summaryArticle`: title, author, date, plain-text summary) and shows it with a note offering `o` to open the page in a browser. For full-text providers:
 
 ```mermaid
 sequenceDiagram
@@ -272,7 +275,7 @@ sequenceDiagram
     Parser-->>AF: *Article (or ErrNoContent)
     Cmd->>Root: articleMsg{reqID, article, err}
     alt reqID is current
-        Root->>AView: showArticle / showError
+        Root->>AView: showArticle, or showSummary(item, err) on failure
     else user left or opened another article
         Root->>Root: drop
     end
@@ -320,7 +323,9 @@ graph LR
 
 ### Parsing
 
-`rss.Parse` decodes into `RSS`, whose `XMLName` requires an `<rss>` root, so an Atom document fails loudly instead of silently yielding zero items. Non-UTF-8 feeds are converted using their XML declaration. `Item.Published()` parses RFC 822 dates (one- or two-digit days) and ISO 8601.
+`rss.Parse` reads the root element and decodes `<rss>` documents directly or `<feed>` (Atom) documents via `atomFeed.toRSS()`, which maps `summary` → `Description`, `published` (else `updated`) → `PubDate`, the alternate `link` → `Link` and author names → `Author`. Any other root is an error, so a feed in an unexpected format fails loudly instead of showing as empty. RSS `dc:creator` fills `Author`. Non-UTF-8 feeds are converted using their XML declaration.
+
+`Item.Published()` parses RFC 822 dates (one- or two-digit days) and ISO 8601. `Item.Summary()` strips HTML from the description and collapses whitespace.
 
 ---
 
@@ -340,10 +345,13 @@ graph TB
 
 `CanParse` compares the URL's parsed host, so `https://evil.example/?u=rnz.co.nz` doesn't match.
 
-**Adding a news source:**
+**Adding a news source:** add a `Provider` to `internal/config/providers.go` with its `Feeds` (RSS 2.0 or Atom).
 
-1. If the site serves articles as plain HTML, add a `Provider` to `internal/config/providers.go` with its `Hosts`, `FullText: true` and `Feeds`. `main` registers a `ReadabilityParser` for it automatically.
-2. If readability can't handle the site, write a type implementing `article.Parser` and register it in `main()`.
+- If the site serves article text as plain HTML, set `FullText: true` and its `Hosts`. `main` registers a `ReadabilityParser` for it automatically.
+- If it doesn't (client-side rendering, a paywall), leave `FullText` false and readers get the feed summary.
+- For a site readability handles badly but which does serve its text, write a type implementing `article.Parser` and register it in `main()`.
+
+Even for full-text providers, if a fetch fails (network error, `ErrNoContent`, `ErrNoParser`), the UI falls back to the summary and shows the error.
 
 ---
 
@@ -358,6 +366,7 @@ stateDiagram-v2
     [*] --> Splash
 
     Splash --> Main : providerSelectedMsg (Enter)
+    Main --> Splash : backToProvidersMsg (Esc / Backspace)
     Main --> Article : openArticleMsg (Enter)
     Article --> Main : closeArticleMsg (q / Esc)
 
@@ -372,13 +381,13 @@ stateDiagram-v2
     Article --> Article : articleMsg / openURLMsg
 ```
 
-Help returns to whichever screen opened it. `Ctrl+C` quits from every screen; `q` quits from the splash and main screens. The `bubbles/list` built-in quit keys are disabled so `Esc` never quits.
+Help returns to whichever screen opened it. `Ctrl+C` quits from every screen; `q` quits from the splash and main screens. The `bubbles/list` built-in quit keys are disabled so `Esc` never quits. Going back to the provider list bumps `feedReqID`, so an in-flight fetch for the old provider is dropped. Picking a provider resets the feed results, cursors and focus.
 
 ### Main View Layout
 
 ```
 ╭──────────────────────────────────────────────────────╮
-│                Knews - NZ News Reader                │  ← Header
+│                    Knews - RNZ                       │  ← Header (provider name)
 ╰──────────────────────────────────────────────────────╯
 ╭─ Feeds ────────────╮╭─ Business ─────────────────────╮
 │ Business           ││ Article title here             │  ← feedList / articleList
@@ -386,7 +395,7 @@ Help returns to whichever screen opened it. `Ctrl+C` quits from every screen; `q
 │ National           ││ Another article title that ... │  ← titles truncated to fit
 │ World              ││   01 Apr 2026                  │
 ╰────────────────────╯╰────────────────────────────────╯
- Press ? for help │ q to quit                              ← Status bar
+ Press ? for help │ Esc providers │ q to quit             ← Status bar
 ```
 
 The status bar is derived from state on every render: "Loading feeds..." while a fetch is in flight, otherwise the current feed's error if it has one, otherwise the help hint (plus a transient notice such as "Feeds refreshed").
@@ -396,10 +405,11 @@ The status bar is derived from state on every render: "Loading feeds..." while a
 | Message | Trigger | Effect |
 |---------|---------|--------|
 | `providerSelectedMsg` | Enter on splash | Reset main view, fetch feeds, switch to main |
+| `backToProvidersMsg` | `Esc` / `Backspace` on main | Drop in-flight feed fetch, return to splash |
 | `feedsMsg` | Feed fetch completes | Store results if `reqID` is current |
 | `requestRefreshMsg` | `r` | Re-fetch feeds unless already loading |
-| `openArticleMsg` | Enter on article | Show loading, start fetch, switch to article |
-| `articleMsg` | Article fetch completes | Show article or error if `reqID` is current |
+| `openArticleMsg` | Enter on article | Show summary, or show loading and start fetch (full-text providers) |
+| `articleMsg` | Article fetch completes | Show article, or summary + error, if `reqID` is current |
 | `openURLMsg` | Browser launch finishes | Show an error notice if it failed |
 | `closeArticleMsg` | `q` / `Esc` in article | Cancel fetch, return to main |
 | `showHelpMsg` / `closeHelpMsg` | `?` / any key | Enter / leave help |

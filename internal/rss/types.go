@@ -1,12 +1,16 @@
-// Package rss fetches and parses RSS 2.0 feeds.
+// Package rss fetches and parses news feeds in RSS 2.0 and Atom formats.
 package rss
 
 import (
 	"encoding/xml"
+	"strings"
 	"time"
+
+	"golang.org/x/net/html"
 )
 
-// RSS is the root element of an RSS 2.0 document.
+// RSS is the root element of an RSS 2.0 document. Parse also converts Atom
+// feeds to this form, so the rest of knews handles a single format.
 type RSS struct {
 	XMLName xml.Name `xml:"rss"`
 	Channel Channel  `xml:"channel"`
@@ -20,13 +24,14 @@ type Channel struct {
 	Items       []Item `xml:"item"`
 }
 
-// Item is a single entry in an RSS feed.
+// Item is a single entry in a feed.
 type Item struct {
 	Title       string `xml:"title"`
-	Description string `xml:"description"`
+	Description string `xml:"description"` // may contain HTML; see Summary
 	PubDate     string `xml:"pubDate"`
 	Link        string `xml:"link"`
 	GUID        string `xml:"guid"`
+	Author      string `xml:"http://purl.org/dc/elements/1.1/ creator"`
 }
 
 // pubDateLayouts are the date formats seen in feeds. RSS specifies RFC 822
@@ -48,6 +53,27 @@ func (i Item) Published() (time.Time, bool) {
 		}
 	}
 	return time.Time{}, false
+}
+
+// Summary returns the item's description as plain text, with HTML markup
+// removed and whitespace collapsed.
+func (i Item) Summary() string {
+	var b strings.Builder
+	z := html.NewTokenizer(strings.NewReader(i.Description))
+	for {
+		switch z.Next() {
+		case html.ErrorToken:
+			return strings.Join(strings.Fields(b.String()), " ")
+		case html.TextToken:
+			b.Write(z.Text())
+		case html.StartTagToken, html.EndTagToken, html.SelfClosingTagToken:
+			// Keep words in separate blocks apart: "<p>a</p><p>b</p>" is "a b".
+			switch name, _ := z.TagName(); string(name) {
+			case "p", "br", "div", "li":
+				b.WriteByte(' ')
+			}
+		}
+	}
 }
 
 // FeedRequest names a feed to fetch.

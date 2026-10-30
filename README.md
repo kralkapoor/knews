@@ -8,13 +8,16 @@ reader (using the same readability algorithm as Firefox's Reader View), so you g
 story and nothing else. It's built in Go with the
 [Bubble Tea](https://github.com/charmbracelet/bubbletea) TUI framework.
 
-> Currently supports [RNZ (Radio New Zealand)](https://www.rnz.co.nz). Providers are
-> plain configuration in `internal/config/providers.go`, so adding a server-rendered
-> news site needs no new code.
+> Supports [RNZ (Radio New Zealand)](https://www.rnz.co.nz) with full article text,
+> plus [Stuff](https://www.stuff.co.nz) and the [NZ Herald](https://www.nzherald.co.nz)
+> as headlines and summaries: their article pages can't be extracted (Stuff renders
+> them with JavaScript; the Herald hides the body behind a subscription check), so
+> press `o` to read those in your browser. Providers are plain configuration in
+> `internal/config/providers.go`, and feeds can be RSS 2.0 or Atom.
 
 ## Features
 
-- Browse RSS feed categories and headlines in a two-panel layout
+- Browse feed categories and headlines from several NZ outlets in a two-panel layout
 - Read full article text in a clean, centred reader view
 - Fully keyboard-driven (vim-style `j`/`k`/`h`/`l` navigation)
 - Concurrent feed fetching via a bounded worker pool
@@ -47,6 +50,7 @@ keybinding list.
 | `Tab`          | Switch panels                       |
 | `Enter`        | Select feed / open article          |
 | `r`            | Refresh feeds                       |
+| `Esc`          | Back to provider list (lists)       |
 | `o`            | Open current article in browser     |
 | `d` / `u`      | Half page down / up (reader)        |
 | `Space` / `b`  | Page down / up (reader)             |
@@ -70,13 +74,7 @@ A running list of things I'd like to investigate or build out next.
 
 ### More feeds & providers
 
-- **Stuff** — publishes per-section Atom feeds at `stuff.co.nz/rss/<section>`
-  (`nz-news`, `world-news`, `business`, `politics`, ...), but article pages are
-  rendered client-side, so readability can't extract them. Show the feed summary
-  plus "open in browser" instead.
-- **NZ Herald** — publishes RSS 2.0 at
-  `nzherald.co.nz/arc/outboundfeeds/rss/section/<section>/?outputType=xml`;
-  Premium articles are paywalled.
+- **The Spinoff** — no public RSS feed found yet.
 - Re-enable the RNZ feeds currently commented out (Sport, Te Ao Māori, Country, etc.).
 
 ### TUI

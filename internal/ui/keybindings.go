@@ -20,6 +20,7 @@ var helpSections = []helpSection{
 		{"h/l Tab", "Switch panel"},
 		{"Enter", "Open article"},
 		{"r", "Refresh feeds"},
+		{"Esc", "Providers"},
 		{"?", "Help"},
 		{"q", "Quit"},
 	}},

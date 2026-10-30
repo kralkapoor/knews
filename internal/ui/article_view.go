@@ -19,8 +19,9 @@ type articleModel struct {
 	viewport viewport.Model
 	title    string
 	url      string           // page to open with "o"; set even while loading or after an error
-	article  *article.Article // nil while loading or after an error
-	message  string           // shown instead of an article: loading text or an error
+	article  *article.Article // nil while loading
+	note     string           // shown after a summary: why it's not the full text
+	message  string           // shown instead of an article: loading text
 	notice   string           // transient status message, cleared on the next key
 	width    int
 	height   int
@@ -61,20 +62,25 @@ func (a *articleModel) showLoading(item rss.Item) {
 	a.viewport.GotoTop()
 }
 
-func (a *articleModel) showError(err error) {
-	a.article = nil
-	a.message = "\n\n" + errorStyle.Render("Error loading article:") + "\n\n" + err.Error() +
-		"\n\n" + statusText("Press ", "o", " to open it in your browser.")
-	a.render()
-	a.viewport.GotoTop()
-}
-
 func (a *articleModel) showArticle(art *article.Article) {
 	a.title = art.Title
 	a.url = art.URL
 	a.article = art
+	a.note = ""
 	a.render()
 	a.viewport.GotoTop()
+}
+
+// showSummary shows an article built from its feed entry rather than the full
+// page, with a note saying why: err is the reason the full text couldn't be
+// loaded, or nil if the provider only offers summaries.
+func (a *articleModel) showSummary(art *article.Article, err error) {
+	a.showArticle(art)
+	a.note = statusText("This is the summary from the feed. Press ", "o", " to read the full article in your browser.")
+	if err != nil {
+		a.note = errorStyle.Render("Couldn't load the full article: ") + err.Error() + "\n\n" + a.note
+	}
+	a.render()
 }
 
 // render wraps the current article or message to the content width and loads
@@ -82,20 +88,22 @@ func (a *articleModel) showArticle(art *article.Article) {
 func (a *articleModel) render() {
 	text := a.message
 	if a.article != nil {
-		text = formatArticle(a.article, a.contentWidth())
+		text = formatArticle(a.article, a.note, a.contentWidth())
 	}
 	a.viewport.SetContent(lipgloss.NewStyle().Width(a.contentWidth()).Render(text))
 }
 
-// formatArticle lays out an article's title, metadata and body as text.
-func formatArticle(art *article.Article, width int) string {
+// formatArticle lays out an article's title, metadata and body as text,
+// followed by note if it isn't empty.
+func formatArticle(art *article.Article, note string, width int) string {
 	var b strings.Builder
 
 	b.WriteString("\n")
 	b.WriteString(titleStyle.Render(art.Title))
 	b.WriteString("\n\n")
 
-	if art.Author != "" {
+	// Some feeds credit every article to the outlet itself; skip that.
+	if art.Author != "" && art.Author != art.Source {
 		b.WriteString(metadataStyle.Render("By " + art.Author))
 		b.WriteString("\n")
 	}
@@ -108,13 +116,21 @@ func formatArticle(art *article.Article, width int) string {
 		b.WriteString("\n")
 	}
 
+	divider := metadataStyle.Render(strings.Repeat("─", min(width, dividerMaxWidth)))
 	b.WriteString("\n")
-	b.WriteString(metadataStyle.Render(strings.Repeat("─", min(width, dividerMaxWidth))))
+	b.WriteString(divider)
 	b.WriteString("\n\n")
 
 	// go-readability separates paragraphs with "\n\n"; widen the gap so
 	// paragraphs stand apart.
 	b.WriteString(strings.ReplaceAll(art.Content, "\n\n", "\n\n\n"))
+
+	if note != "" {
+		b.WriteString("\n\n")
+		b.WriteString(divider)
+		b.WriteString("\n\n")
+		b.WriteString(note)
+	}
 
 	// Trailing space so the end of the article can be scrolled clear.
 	b.WriteString("\n\n")

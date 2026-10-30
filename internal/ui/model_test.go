@@ -14,14 +14,24 @@ import (
 	"github.com/kralkapoor/knews/internal/rss"
 )
 
-var testProvider = config.Provider{
-	Name:        "Test",
-	Description: "Test News",
-	Feeds: []config.Feed{
-		{Name: "One", URL: "https://test.example/one.xml"},
-		{Name: "Two", URL: "https://test.example/two.xml"},
-	},
-}
+var (
+	testProvider = config.Provider{
+		Name:        "Test",
+		Description: "Test News",
+		FullText:    true,
+		Feeds: []config.Feed{
+			{Name: "One", URL: "https://test.example/one.xml"},
+			{Name: "Two", URL: "https://test.example/two.xml"},
+		},
+	}
+	summaryProvider = config.Provider{
+		Name:        "Summaries",
+		Description: "Summaries only",
+		Feeds: []config.Feed{
+			{Name: "Headlines", URL: "https://summaries.example/rss"},
+		},
+	}
+)
 
 // fakeFeeds returns n items for each requested feed, or an error for feeds
 // named in failing.
@@ -40,21 +50,28 @@ func (f fakeFeeds) FetchAll(_ context.Context, requests []rss.FeedRequest) []rss
 		}
 		for j := range f.items[req.Name] {
 			results[i].Feed.Channel.Items = append(results[i].Feed.Channel.Items, rss.Item{
-				Title:   fmt.Sprintf("%s story %d with a headline long enough to need truncating on narrow screens", req.Name, j),
-				Link:    fmt.Sprintf("https://test.example/%s/%d", req.Name, j),
-				PubDate: "Sun, 18 Jan 2026 19:25:50 +1300",
+				Title:       fmt.Sprintf("%s story %d with a headline long enough to need truncating on narrow screens", req.Name, j),
+				Link:        fmt.Sprintf("https://test.example/%s/%d", req.Name, j),
+				PubDate:     "Sun, 18 Jan 2026 19:25:50 +1300",
+				Author:      "A. Reporter",
+				Description: fmt.Sprintf("<p>Summary of %s story %d.</p>", req.Name, j),
 			})
 		}
 	}
 	return results
 }
 
-// fakeArticles returns an article titled after the URL, or err if set.
+// fakeArticles returns an article titled after the URL, or err if set. It
+// counts calls in fetches if that's non-nil.
 type fakeArticles struct {
-	err error
+	err     error
+	fetches *int
 }
 
 func (f fakeArticles) Fetch(_ context.Context, url string) (*article.Article, error) {
+	if f.fetches != nil {
+		*f.fetches++
+	}
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -63,7 +80,8 @@ func (f fakeArticles) Fetch(_ context.Context, url string) (*article.Article, er
 
 func newTestModel(t *testing.T, feeds fakeFeeds, articles fakeArticles, width, height int) Model {
 	t.Helper()
-	m, _ := send(t, NewModel([]config.Provider{testProvider}, feeds, articles), tea.WindowSizeMsg{Width: width, Height: height})
+	providers := []config.Provider{testProvider, summaryProvider}
+	m, _ := send(t, NewModel(providers, feeds, articles), tea.WindowSizeMsg{Width: width, Height: height})
 	return m
 }
 
@@ -108,6 +126,8 @@ func keyMsg(k string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyEnter}
 	case "esc":
 		return tea.KeyMsg{Type: tea.KeyEsc}
+	case "backspace":
+		return tea.KeyMsg{Type: tea.KeyBackspace}
 	case "tab":
 		return tea.KeyMsg{Type: tea.KeyTab}
 	case "ctrl+c":
@@ -225,12 +245,16 @@ func TestStaleArticleResultIgnored(t *testing.T) {
 	}
 }
 
-func TestArticleErrorKeepsOpenInBrowser(t *testing.T) {
+func TestArticleErrorFallsBackToSummary(t *testing.T) {
 	m := newTestModel(t, defaultFeeds(), fakeArticles{err: errors.New("no parser")}, 80, 24)
 	m, _ = press(t, m, "enter", "l", "enter")
 
-	if !strings.Contains(m.articleView.message, "no parser") {
-		t.Errorf("message = %q, want the error", m.articleView.message)
+	art := m.articleView.article
+	if art == nil || art.Content != "Summary of One story 0." || art.Author != "A. Reporter" {
+		t.Fatalf("article = %+v, want the feed summary", art)
+	}
+	if !strings.Contains(m.articleView.note, "no parser") {
+		t.Errorf("note = %q, want the error", m.articleView.note)
 	}
 	if want := "https://test.example/One/0"; m.articleView.url != want {
 		t.Errorf("url = %q, want %q", m.articleView.url, want)
@@ -350,5 +374,68 @@ func TestViewFillsWindow(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestSummaryProviderDoesNotFetchArticles(t *testing.T) {
+	var fetches int
+	m := newTestModel(t, fakeFeeds{items: map[string]int{"Headlines": 2}}, fakeArticles{fetches: &fetches}, 80, 24)
+	m, _ = press(t, m, "j", "enter", "l", "enter")
+
+	if m.activeScreen != screenArticle {
+		t.Fatalf("activeScreen = %v, want article", m.activeScreen)
+	}
+	if fetches != 0 {
+		t.Errorf("fetched the article page %d times, want 0", fetches)
+	}
+	art := m.articleView.article
+	if art == nil || art.Content != "Summary of Headlines story 0." || art.Source != "Summaries" {
+		t.Fatalf("article = %+v, want the feed summary", art)
+	}
+	if m.articleView.note == "" || strings.Contains(m.articleView.note, "Couldn't") {
+		t.Errorf("note = %q, want the summary notice without an error", m.articleView.note)
+	}
+}
+
+func TestBackToProviders(t *testing.T) {
+	m := newTestModel(t, fakeFeeds{items: map[string]int{"One": 5, "Two": 5, "Headlines": 2}}, fakeArticles{}, 80, 24)
+	m, _ = press(t, m, "enter", "j", "l", "j")
+
+	for _, k := range []string{"esc", "backspace"} {
+		m, _ = press(t, m, k)
+		if m.activeScreen != screenSplash {
+			t.Fatalf("activeScreen after %s = %v, want splash", k, m.activeScreen)
+		}
+		m, _ = press(t, m, "enter")
+	}
+
+	// Switch to the other provider: nothing carries over.
+	m, _ = press(t, m, "esc", "j", "enter")
+	if m.main.provider != "Summaries" || m.main.currentFeed != "Headlines" {
+		t.Fatalf("provider/feed = %q/%q, want Summaries/Headlines", m.main.provider, m.main.currentFeed)
+	}
+	if m.main.focus != focusFeedList || m.main.feedList.Index() != 0 || m.main.articleList.Index() != 0 {
+		t.Errorf("focus/cursors not reset: focus=%v feed=%d article=%d",
+			m.main.focus, m.main.feedList.Index(), m.main.articleList.Index())
+	}
+	if _, ok := m.main.feedResults["One"]; ok {
+		t.Error("previous provider's feed results are still stored")
+	}
+	if !strings.Contains(m.View(), "Knews - Summaries") {
+		t.Error("header doesn't name the provider")
+	}
+}
+
+func TestFeedsFromPreviousProviderIgnored(t *testing.T) {
+	m := newTestModel(t, defaultFeeds(), fakeArticles{}, 80, 24)
+
+	// Pick the first provider, then leave before its feeds arrive.
+	next, staleCmd := m.Update(providerSelectedMsg{provider: testProvider})
+	m, _ = send(t, next.(Model), backToProvidersMsg{})
+	m, _ = send(t, m, providerSelectedMsg{provider: summaryProvider})
+
+	m, _ = send(t, m, staleCmd())
+	if _, ok := m.main.feedResults["One"]; ok {
+		t.Error("feeds for the previous provider were stored")
 	}
 }

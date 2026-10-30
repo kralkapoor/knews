@@ -10,7 +10,7 @@ import (
 	"github.com/kralkapoor/knews/internal/config"
 )
 
-const providerListWidth = 30
+const minProviderListWidth = 30
 
 const knewsBanner = `
 888  /   888b    | 888~~  Y88b         / ,d88~~\
@@ -72,7 +72,13 @@ func newSplashModel(providers []config.Provider) splashModel {
 		items[i] = providerItem{provider: p}
 	}
 
-	l := newList(providerDelegate{}, providerListWidth, len(providers)*2)
+	// Wide enough for the longest description and its 4-column indent.
+	width := minProviderListWidth
+	for _, p := range providers {
+		width = max(width, lipgloss.Width(p.Description)+4, lipgloss.Width(p.Name)+2)
+	}
+
+	l := newList(providerDelegate{}, width, len(providers)*2)
 	l.SetItems(items)
 	return splashModel{providerList: l}
 }
