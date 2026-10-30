@@ -3,51 +3,35 @@ package rss
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
+
+	"github.com/kralkapoor/knews/internal/httpx"
 )
 
-type FeedClient struct{}
-
-func NewFeedClient() *FeedClient {
-	return &FeedClient{}
+// Client fetches and parses individual feeds.
+type Client struct {
+	http *http.Client
 }
 
-func (fc *FeedClient) Fetch(ctx context.Context, url string) ([]byte, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request for %s: %w", url, err)
+// NewClient returns a Client that sends requests with hc, or with
+// httpx.NewClient() if hc is nil.
+func NewClient(hc *http.Client) *Client {
+	if hc == nil {
+		hc = httpx.NewClient()
 	}
-
-	response, err := http.DefaultClient.Do(request)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch %s: %w", url, err)
-	}
-	defer response.Body.Close()
-
-	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code %d for %s", response.StatusCode, url)
-	}
-
-	bodyBytes, err := io.ReadAll(response.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response body from %s: %w", url, err)
-	}
-
-	return bodyBytes, nil
+	return &Client{http: hc}
 }
 
-// FetchAndParse fetches the RSS feed from the URL and parses it into an Rss struct.
-func (fc *FeedClient) FetchAndParse(ctx context.Context, url string) (Rss, error) {
-	bodyBytes, err := fc.Fetch(ctx, url)
+// Fetch downloads the feed at url and parses it.
+func (c *Client) Fetch(ctx context.Context, url string) (RSS, error) {
+	body, err := httpx.Get(ctx, c.http, url)
 	if err != nil {
-		return Rss{}, err
+		return RSS{}, err
 	}
 
-	rss, err := ParseXmlResponse(bodyBytes)
+	feed, err := Parse(body)
 	if err != nil {
-		return Rss{}, fmt.Errorf("failed to parse RSS from %s: %w", url, err)
+		return RSS{}, fmt.Errorf("parse feed %s: %w", url, err)
 	}
-
-	return rss, nil
+	return feed, nil
 }

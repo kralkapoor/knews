@@ -1,99 +1,100 @@
 package ui
 
 import (
-	"fmt"
-	"os/exec"
-	"runtime"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/kralkapoor/knews/internal/article"
+	"github.com/kralkapoor/knews/internal/rss"
+)
+
+const (
+	articleMaxWidth = 80 // readable line length cap
+	dividerMaxWidth = 60
 )
 
 type articleModel struct {
-	viewport   viewport.Model
-	currentURL string
-	title      string
-	width      int
-	height     int
+	viewport viewport.Model
+	title    string
+	url      string           // page to open with "o"; set even while loading or after an error
+	article  *article.Article // nil while loading or after an error
+	message  string           // shown instead of an article: loading text or an error
+	notice   string           // transient status message, cleared on the next key
+	width    int
+	height   int
 }
 
 func newArticleModel() articleModel {
-	vp := viewport.New(80, 20)
-	return articleModel{
-		viewport: vp,
-	}
+	return articleModel{viewport: viewport.New(articleMaxWidth, 20)}
 }
 
 // contentWidth calculates the readable content width: capped at 80 columns
 // and no more than 3/4 of the terminal width, for comfortable reading.
-func (a *articleModel) contentWidth() int {
-	maxWidth := a.width * 3 / 4
-	if maxWidth > 80 {
-		maxWidth = 80
+func (a articleModel) contentWidth() int {
+	w := min(a.width*3/4, articleMaxWidth)
+	if w < 40 {
+		w = a.width - 4
 	}
-	if maxWidth < 40 {
-		maxWidth = a.width - 4
-	}
-	if maxWidth < 1 {
-		maxWidth = 1
-	}
-	return maxWidth
+	return max(w, 1)
 }
 
 func (a *articleModel) setSize(width, height int) {
 	a.width = width
 	a.height = height
 
-	// Reserve 1 line for the status bar, 2 for the box borders
-	vpHeight := height - 3
-	if vpHeight < 1 {
-		vpHeight = 1
-	}
+	// Reserve 1 line for the status bar, 2 for the box borders.
 	a.viewport.Width = a.contentWidth()
-	a.viewport.Height = vpHeight
+	a.viewport.Height = max(height-3, 1)
+
+	// The text is wrapped to the old width; rewrap it.
+	a.render()
 }
 
-func (a *articleModel) showLoading(title string) {
-	a.title = truncateTitle(title, 60)
-	a.currentURL = ""
-	a.viewport.SetContent(keyStyle.Render("\n\nLoading article..."))
+func (a *articleModel) showLoading(item rss.Item) {
+	a.title = item.Title
+	a.url = item.Link
+	a.article = nil
+	a.message = keyStyle.Render("\n\nLoading article...")
+	a.render()
 	a.viewport.GotoTop()
 }
 
-func (a *articleModel) showError(title string, err error) {
-	a.title = truncateTitle(title, 60)
-	a.currentURL = ""
-	content := fmt.Sprintf("\n\n%s\n\n%s",
-		errorStyle.Render("Error loading article:"),
-		err.Error(),
-	)
-	a.viewport.SetContent(content)
+func (a *articleModel) showError(err error) {
+	a.article = nil
+	a.message = "\n\n" + errorStyle.Render("Error loading article:") + "\n\n" + err.Error() +
+		"\n\n" + statusText("Press ", "o", " to open it in your browser.")
+	a.render()
 	a.viewport.GotoTop()
 }
 
 func (a *articleModel) showArticle(art *article.Article) {
-	a.title = truncateTitle(art.Title, 60)
-	a.currentURL = art.URL
+	a.title = art.Title
+	a.url = art.URL
+	a.article = art
+	a.render()
+	a.viewport.GotoTop()
+}
 
-	contentWidth := a.contentWidth()
-	dividerWidth := contentWidth
-	if dividerWidth > 60 {
-		dividerWidth = 60
+// render wraps the current article or message to the content width and loads
+// it into the viewport. The viewport clips long lines rather than wrapping.
+func (a *articleModel) render() {
+	text := a.message
+	if a.article != nil {
+		text = formatArticle(a.article, a.contentWidth())
 	}
+	a.viewport.SetContent(lipgloss.NewStyle().Width(a.contentWidth()).Render(text))
+}
 
+// formatArticle lays out an article's title, metadata and body as text.
+func formatArticle(art *article.Article, width int) string {
 	var b strings.Builder
 
-	// Leading whitespace for breathing room
 	b.WriteString("\n")
-
-	// Title
 	b.WriteString(titleStyle.Render(art.Title))
 	b.WriteString("\n\n")
 
-	// Metadata
 	if art.Author != "" {
 		b.WriteString(metadataStyle.Render("By " + art.Author))
 		b.WriteString("\n")
@@ -108,102 +109,64 @@ func (a *articleModel) showArticle(art *article.Article) {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(metadataStyle.Render(strings.Repeat("─", dividerWidth)))
+	b.WriteString(metadataStyle.Render(strings.Repeat("─", min(width, dividerMaxWidth))))
 	b.WriteString("\n\n")
 
-	// Content — add extra blank lines between paragraphs for readability.
-	// go-readability's RenderText uses \n\n for paragraph breaks; we widen
-	// those to \n\n\n so paragraphs have visible separation.
-	content := strings.ReplaceAll(art.Content, "\n\n", "\n\n\n")
-	b.WriteString(content)
+	// go-readability separates paragraphs with "\n\n"; widen the gap so
+	// paragraphs stand apart.
+	b.WriteString(strings.ReplaceAll(art.Content, "\n\n", "\n\n\n"))
 
-	// Trailing whitespace so user can scroll past the end comfortably
+	// Trailing space so the end of the article can be scrolled clear.
 	b.WriteString("\n\n")
 
-	// Word-wrap the entire content to the viewport width so lines don't get
-	// clipped. The viewport itself doesn't wrap text — it just clips.
-	wrapped := lipgloss.NewStyle().Width(contentWidth).Render(b.String())
-	a.viewport.SetContent(wrapped)
-	a.viewport.GotoTop()
+	return b.String()
 }
 
 func (a articleModel) Update(msg tea.Msg) (articleModel, tea.Cmd) {
 	switch msg := msg.(type) {
+	case openURLMsg:
+		if msg.err != nil {
+			a.notice = errorStyle.Render("Couldn't open browser: " + msg.err.Error())
+		}
+		return a, nil
+
 	case tea.KeyMsg:
+		a.notice = ""
 		switch msg.String() {
 		case "q", "esc":
 			return a, func() tea.Msg { return closeArticleMsg{} }
+		case "?":
+			return a, func() tea.Msg { return showHelpMsg{} }
 		case "o":
-			a.openInBrowser()
-			return a, nil
-		case "j", "down":
-			a.viewport.LineDown(1)
-			return a, nil
-		case "k", "up":
-			a.viewport.LineUp(1)
-			return a, nil
+			if a.url == "" {
+				return a, nil
+			}
+			return a, openURLCmd(a.url)
 		case "g", "home":
 			a.viewport.GotoTop()
 			return a, nil
 		case "G", "end":
 			a.viewport.GotoBottom()
 			return a, nil
-		case "pgdown":
-			a.viewport.HalfViewDown()
-			return a, nil
-		case "pgup":
-			a.viewport.HalfViewUp()
-			return a, nil
 		}
 	}
 
+	// The viewport's own keymap handles scrolling: j/k, d/u, space/f/b, pgup/pgdn.
 	var cmd tea.Cmd
 	a.viewport, cmd = a.viewport.Update(msg)
 	return a, cmd
 }
 
 func (a articleModel) View() string {
-	// Center the viewport content horizontally within the full-width box
+	// Center the viewport content horizontally within the full-width box.
 	vpView := lipgloss.PlaceHorizontal(a.width-2, lipgloss.Center, a.viewport.View())
-	box := titledBox(vpView, a.title, a.width, a.height-1, colorDarkCyan)
+	box := titledBox(vpView, a.title, a.width, a.height-statusHeight, colorDarkCyan)
 
-	// Status bar
 	status := statusText(" ", "q", " Back │ ", "o", " Open in browser │ ", "j/k", " Scroll")
+	if a.notice != "" {
+		status = " " + a.notice
+	}
+	status = lipgloss.NewStyle().MaxWidth(a.width).Render(status)
 
 	return lipgloss.JoinVertical(lipgloss.Left, box, status)
-}
-
-func (a *articleModel) openInBrowser() {
-	if a.currentURL == "" {
-		return
-	}
-
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "linux":
-		cmd = exec.Command("xdg-open", a.currentURL)
-	case "darwin":
-		cmd = exec.Command("open", a.currentURL)
-	case "windows":
-		cmd = exec.Command("cmd", "/c", "start", a.currentURL)
-	default:
-		return
-	}
-
-	cmd.Start()
-}
-
-// truncateTitle shortens a title string for display in the border. It counts
-// runes rather than bytes so multi-byte characters (e.g. the macrons in te reo
-// Māori) are never split mid-character.
-func truncateTitle(s string, maxLength int) string {
-	s = strings.TrimSpace(s)
-	runes := []rune(s)
-	if len(runes) <= maxLength {
-		return s
-	}
-	if maxLength < 3 {
-		return string(runes[:maxLength])
-	}
-	return string(runes[:maxLength-3]) + "..."
 }

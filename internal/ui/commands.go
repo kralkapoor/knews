@@ -2,6 +2,8 @@ package ui
 
 import (
 	"context"
+	"os/exec"
+	"runtime"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -10,66 +12,85 @@ import (
 	"github.com/kralkapoor/knews/internal/rss"
 )
 
-// Messages returned by async commands.
+const (
+	feedsTimeout   = 30 * time.Second
+	articleTimeout = 15 * time.Second
+)
 
-type feedsLoadedMsg struct {
+// feedSource fetches RSS feeds; *rss.Fetcher implements it.
+type feedSource interface {
+	FetchAll(ctx context.Context, requests []rss.FeedRequest) []rss.FeedResult
+}
+
+// articleSource fetches full articles; *article.Fetcher implements it.
+type articleSource interface {
+	Fetch(ctx context.Context, url string) (*article.Article, error)
+}
+
+// Messages returned by async commands. Each carries the request ID it was
+// started with so that results the user has since moved on from can be
+// dropped.
+
+type feedsMsg struct {
+	reqID   int
+	refresh bool
 	results []rss.FeedResult
 }
 
-type feedsRefreshedMsg struct {
-	results []rss.FeedResult
-}
-
-type articleLoadedMsg struct {
+type articleMsg struct {
+	reqID   int
 	article *article.Article
-	title   string
+	err     error
 }
 
-type articleErrorMsg struct {
-	err   error
-	title string
+type openURLMsg struct {
+	err error
 }
 
-// fetchFeedsCmd fetches all RSS feeds for a provider (30s timeout).
-func fetchFeedsCmd(fetcher *rss.FeedFetcher, provider config.Provider) tea.Cmd {
+// fetchFeedsCmd fetches all of a provider's feeds.
+func fetchFeedsCmd(src feedSource, feeds []config.Feed, reqID int, refresh bool) tea.Cmd {
+	requests := make([]rss.FeedRequest, len(feeds))
+	for i, f := range feeds {
+		requests[i] = rss.FeedRequest{Name: f.Name, URL: f.URL}
+	}
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), feedsTimeout)
 		defer cancel()
-
-		results := fetcher.FetchAllFromMap(ctx, provider.Feeds)
-		return feedsLoadedMsg{results: results}
+		return feedsMsg{reqID: reqID, refresh: refresh, results: src.FetchAll(ctx, requests)}
 	}
 }
 
-// refreshFeedsCmd re-fetches all RSS feeds for a provider (30s timeout).
-func refreshFeedsCmd(fetcher *rss.FeedFetcher, provider config.Provider) tea.Cmd {
+// fetchArticleCmd fetches the article at url. The caller owns ctx so it can
+// cancel the fetch when the user leaves the article view.
+func fetchArticleCmd(ctx context.Context, src articleSource, url string, reqID int) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-
-		results := fetcher.FetchAllFromMap(ctx, provider.Feeds)
-		return feedsRefreshedMsg{results: results}
+		art, err := src.Fetch(ctx, url)
+		return articleMsg{reqID: reqID, article: art, err: err}
 	}
 }
 
-// fetchArticleCmd fetches full article content (15s timeout).
-func fetchArticleCmd(fetcher *article.ArticleFetcher, item rss.Item) tea.Cmd {
+// openURLCmd opens url in the default browser.
+func openURLCmd(url string) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-
-		art, err := fetcher.Fetch(ctx, item.Link)
-		if err != nil {
-			return articleErrorMsg{err: err, title: item.Title}
+		var cmd *exec.Cmd
+		switch runtime.GOOS {
+		case "darwin":
+			cmd = exec.Command("open", url)
+		case "windows":
+			// Unlike "cmd /c start", this doesn't treat & in the URL as a
+			// command separator.
+			cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+		default:
+			cmd = exec.Command("xdg-open", url)
 		}
-		return articleLoadedMsg{article: art, title: item.Title}
+		return openURLMsg{err: cmd.Run()}
 	}
 }
 
 // Internal messages for screen transitions.
 
 type providerSelectedMsg struct {
-	name string
+	provider config.Provider
 }
 
 type openArticleMsg struct {

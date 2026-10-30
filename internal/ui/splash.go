@@ -10,6 +10,8 @@ import (
 	"github.com/kralkapoor/knews/internal/config"
 )
 
+const providerListWidth = 30
+
 const knewsBanner = `
 888  /   888b    | 888~~  Y88b         / ,d88~~\
 888 /    |Y88b   | 888___  Y88b       /  8888
@@ -21,13 +23,10 @@ const knewsBanner = `
 
 // providerItem implements list.Item for the provider selection list.
 type providerItem struct {
-	name        string
-	description string
+	provider config.Provider
 }
 
-func (p providerItem) Title() string       { return p.name }
-func (p providerItem) Description() string { return p.description }
-func (p providerItem) FilterValue() string { return p.name }
+func (p providerItem) FilterValue() string { return p.provider.Name }
 
 // providerDelegate renders items in the provider list.
 type providerDelegate struct{}
@@ -43,19 +42,20 @@ func (d providerDelegate) Render(w io.Writer, m list.Model, index int, item list
 	}
 
 	selected := index == m.Index()
-
-	nameStyle := lipgloss.NewStyle().PaddingLeft(2)
-	descStyle := lipgloss.NewStyle().PaddingLeft(4).Foreground(colorGray)
-
+	base := lipgloss.NewStyle()
 	if selected {
-		nameStyle = nameStyle.Foreground(lipgloss.Color("15")).Background(colorDarkCyan).Bold(true)
-		descStyle = descStyle.Foreground(lipgloss.Color("15")).Background(colorDarkCyan)
+		base = selectedStyle
+	}
+	nameStyle := base.Bold(selected).PaddingLeft(2)
+	descStyle := base.PaddingLeft(4)
+	if !selected {
+		descStyle = descStyle.Foreground(colorGray)
 	}
 
 	// Pad to full width
 	availWidth := m.Width()
-	name := nameStyle.Width(availWidth).Render(pi.name)
-	desc := descStyle.Width(availWidth).Render(pi.description)
+	name := nameStyle.Width(availWidth).Render(truncateString(pi.provider.Name, availWidth-2))
+	desc := descStyle.Width(availWidth).Render(truncateString(pi.provider.Description, availWidth-4))
 
 	fmt.Fprintf(w, "%s\n%s", name, desc)
 }
@@ -66,24 +66,20 @@ type splashModel struct {
 	height       int
 }
 
-func newSplashModel() splashModel {
-	providers := config.ProviderNames()
+func newSplashModel(providers []config.Provider) splashModel {
 	items := make([]list.Item, len(providers))
-	for i, name := range providers {
-		p := config.GetProvider(name)
-		items[i] = providerItem{name: name, description: p.Description}
+	for i, p := range providers {
+		items[i] = providerItem{provider: p}
 	}
 
-	l := list.New(items, providerDelegate{}, 30, len(providers)*2+1)
-	l.SetShowTitle(false)
-	l.SetShowStatusBar(false)
-	l.SetShowFilter(false)
-	l.SetShowHelp(false)
-	l.SetShowPagination(false)
+	l := newList(providerDelegate{}, providerListWidth, len(providers)*2)
+	l.SetItems(items)
+	return splashModel{providerList: l}
+}
 
-	return splashModel{
-		providerList: l,
-	}
+func (s *splashModel) setSize(width, height int) {
+	s.width = width
+	s.height = height
 }
 
 func (s splashModel) Update(msg tea.Msg) (splashModel, tea.Cmd) {
@@ -92,11 +88,13 @@ func (s splashModel) Update(msg tea.Msg) (splashModel, tea.Cmd) {
 		switch msg.String() {
 		case "q":
 			return s, tea.Quit
+		case "?":
+			return s, func() tea.Msg { return showHelpMsg{} }
 		case "enter":
-			item, ok := s.providerList.SelectedItem().(providerItem)
-			if ok {
-				return s, func() tea.Msg { return providerSelectedMsg{name: item.name} }
+			if item, ok := s.providerList.SelectedItem().(providerItem); ok {
+				return s, func() tea.Msg { return providerSelectedMsg{provider: item.provider} }
 			}
+			return s, nil
 		}
 	}
 
@@ -118,7 +116,7 @@ func (s splashModel) View() string {
 	listView := lipgloss.PlaceHorizontal(s.width, lipgloss.Center, s.providerList.View())
 
 	// Status bar
-	status := statusText(" ", "Enter", " Select  ", "q", " Quit")
+	status := statusText(" ", "Enter", " Select  ", "?", " Help  ", "q", " Quit")
 
 	statusBox := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -136,8 +134,10 @@ func (s splashModel) View() string {
 	)
 
 	// Center content vertically, then add status bar at bottom
-	contentHeight := s.height - lipgloss.Height(statusBox) - 1
+	contentHeight := max(s.height-lipgloss.Height(statusBox), 0)
 	centeredContent := lipgloss.Place(s.width, contentHeight, lipgloss.Center, lipgloss.Center, content)
 
-	return lipgloss.JoinVertical(lipgloss.Left, centeredContent, statusBox)
+	view := lipgloss.JoinVertical(lipgloss.Left, centeredContent, statusBox)
+	// Clip rather than overflow on terminals too small for the banner.
+	return lipgloss.NewStyle().MaxWidth(s.width).MaxHeight(s.height).Render(view)
 }

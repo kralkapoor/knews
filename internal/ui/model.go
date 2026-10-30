@@ -1,8 +1,10 @@
+// Package ui implements the knews terminal interface with Bubble Tea.
 package ui
 
 import (
+	"context"
+
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/kralkapoor/knews/internal/article"
 	"github.com/kralkapoor/knews/internal/config"
 	"github.com/kralkapoor/knews/internal/rss"
 )
@@ -19,28 +21,34 @@ const (
 // Model is the root bubbletea model for the application.
 type Model struct {
 	activeScreen screen
+	helpReturn   screen // screen to go back to when help closes
 	splash       splashModel
 	main         mainModel
 	articleView  articleModel
 	help         helpModel
 
-	feedFetcher      *rss.FeedFetcher
-	articleFetcher   *article.ArticleFetcher
-	selectedProvider string
-	width            int
-	height           int
+	feeds    feedSource
+	articles articleSource
+	provider config.Provider // zero until the user picks one
+
+	// Request IDs of the latest feed and article fetches. Results carrying
+	// any other ID are stale and dropped.
+	feedReqID     int
+	articleReqID  int
+	cancelArticle context.CancelFunc // cancels the in-flight article fetch, if any
 }
 
-// NewModel creates a new root Model with all sub-models initialized.
-func NewModel(feedFetcher *rss.FeedFetcher, articleFetcher *article.ArticleFetcher) Model {
+// NewModel returns the root model. providers are offered on the splash
+// screen; feeds and articles are usually an *rss.Fetcher and an
+// *article.Fetcher.
+func NewModel(providers []config.Provider, feeds feedSource, articles articleSource) Model {
 	return Model{
-		activeScreen:   screenSplash,
-		splash:         newSplashModel(),
-		main:           newMainModel(),
-		articleView:    newArticleModel(),
-		help:           newHelpModel(),
-		feedFetcher:    feedFetcher,
-		articleFetcher: articleFetcher,
+		activeScreen: screenSplash,
+		splash:       newSplashModel(providers),
+		main:         newMainModel(),
+		articleView:  newArticleModel(),
+		feeds:        feeds,
+		articles:     articles,
 	}
 }
 
@@ -51,101 +59,91 @@ func (m Model) Init() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		m.splash.width = msg.Width
-		m.splash.height = msg.Height
-		m.splash.providerList.SetSize(30, msg.Height/3)
+		m.splash.setSize(msg.Width, msg.Height)
 		m.main.setSize(msg.Width, msg.Height)
 		m.articleView.setSize(msg.Width, msg.Height)
-		m.help.width = msg.Width
-		m.help.height = msg.Height
+		m.help.setSize(msg.Width, msg.Height)
 		return m, nil
 
-	// Async result messages — handled regardless of active screen.
-	case feedsLoadedMsg:
-		feedOrder := config.GetProvider(m.selectedProvider).FeedOrder
-		firstFeed := ""
-		if len(feedOrder) > 0 {
-			firstFeed = feedOrder[0]
+	case tea.KeyMsg:
+		if msg.Type == tea.KeyCtrlC {
+			return m, tea.Quit
 		}
-		m.main.setFeedResults(msg.results, firstFeed)
-		m.main.statusMsg = statusText("Press ", "?", " for help │ ", "q", " to quit")
+
+	// Async results — handled regardless of the active screen.
+	case feedsMsg:
+		if msg.reqID != m.feedReqID {
+			return m, nil
+		}
+		m.main.loading = false
+		m.main.setFeedResults(msg.results)
+		if msg.refresh {
+			m.main.notice = successStyle.Render("Feeds refreshed")
+		}
 		return m, nil
 
-	case feedsRefreshedMsg:
-		m.main.setFeedResults(msg.results, m.main.currentFeed)
-		m.main.statusMsg = successStyle.Render("Feeds refreshed") +
-			statusText(" │ Press ", "?", " for help")
+	case articleMsg:
+		if msg.reqID != m.articleReqID {
+			return m, nil
+		}
+		if m.cancelArticle != nil {
+			m.cancelArticle()
+			m.cancelArticle = nil
+		}
+		switch {
+		case msg.err != nil:
+			m.articleView.showError(msg.err)
+		case msg.article != nil:
+			m.articleView.showArticle(msg.article)
+		}
 		return m, nil
 
-	case articleLoadedMsg:
-		m.articleView.showArticle(msg.article)
-		return m, nil
-
-	case articleErrorMsg:
-		m.articleView.showError(msg.title, msg.err)
-		return m, nil
-
-	// Screen transition messages.
+	// Screen transitions.
 	case providerSelectedMsg:
-		m.selectedProvider = msg.name
-		provider := config.GetProvider(msg.name)
-		m.main.setFeeds(provider.FeedOrder)
-		m.main.statusMsg = keyStyle.Render("Loading feeds...")
+		m.provider = msg.provider
+		m.main.setFeeds(msg.provider.Feeds)
 		m.activeScreen = screenMain
-		return m, fetchFeedsCmd(m.feedFetcher, provider)
+		return m, m.fetchFeeds(false)
+
+	case requestRefreshMsg:
+		if m.main.loading {
+			return m, nil
+		}
+		return m, m.fetchFeeds(true)
 
 	case openArticleMsg:
-		m.articleView.showLoading(msg.item.Title)
+		m.articleView.showLoading(msg.item)
 		m.activeScreen = screenArticle
-		return m, fetchArticleCmd(m.articleFetcher, msg.item)
+		return m, m.fetchArticle(msg.item)
+
+	case closeArticleMsg:
+		m.stopArticleFetch()
+		m.activeScreen = screenMain
+		return m, nil
 
 	case showHelpMsg:
+		m.helpReturn = m.activeScreen
 		m.activeScreen = screenHelp
 		return m, nil
 
-	case closeArticleMsg:
-		m.activeScreen = screenMain
-		return m, nil
-
 	case closeHelpMsg:
-		m.activeScreen = screenMain
+		m.activeScreen = m.helpReturn
 		return m, nil
-
-	case requestRefreshMsg:
-		if m.selectedProvider == "" {
-			return m, nil
-		}
-		provider := config.GetProvider(m.selectedProvider)
-		m.main.statusMsg = keyStyle.Render("Refreshing feeds...")
-		return m, refreshFeedsCmd(m.feedFetcher, provider)
 	}
 
-	// Route to active screen's Update.
+	// Route everything else to the active screen.
+	var cmd tea.Cmd
 	switch m.activeScreen {
 	case screenSplash:
-		var cmd tea.Cmd
 		m.splash, cmd = m.splash.Update(msg)
-		return m, cmd
-
 	case screenMain:
-		var cmd tea.Cmd
 		m.main, cmd = m.main.Update(msg)
-		return m, cmd
-
 	case screenArticle:
-		var cmd tea.Cmd
 		m.articleView, cmd = m.articleView.Update(msg)
-		return m, cmd
-
 	case screenHelp:
-		var cmd tea.Cmd
 		m.help, cmd = m.help.Update(msg)
-		return m, cmd
 	}
-
-	return m, nil
+	return m, cmd
 }
 
 func (m Model) View() string {
@@ -160,4 +158,31 @@ func (m Model) View() string {
 		return m.help.View()
 	}
 	return ""
+}
+
+// fetchFeeds starts fetching the selected provider's feeds, superseding any
+// fetch already in flight.
+func (m *Model) fetchFeeds(refresh bool) tea.Cmd {
+	m.feedReqID++
+	m.main.loading = true
+	return fetchFeedsCmd(m.feeds, m.provider.Feeds, m.feedReqID, refresh)
+}
+
+// fetchArticle starts fetching item's article, cancelling any fetch already
+// in flight.
+func (m *Model) fetchArticle(item rss.Item) tea.Cmd {
+	m.stopArticleFetch()
+	ctx, cancel := context.WithTimeout(context.Background(), articleTimeout)
+	m.cancelArticle = cancel
+	return fetchArticleCmd(ctx, m.articles, item.Link, m.articleReqID)
+}
+
+// stopArticleFetch cancels the in-flight article fetch, if any, and makes
+// sure its result is ignored.
+func (m *Model) stopArticleFetch() {
+	if m.cancelArticle != nil {
+		m.cancelArticle()
+		m.cancelArticle = nil
+	}
+	m.articleReqID++
 }

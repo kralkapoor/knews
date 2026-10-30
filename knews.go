@@ -1,3 +1,4 @@
+// Command knews is a terminal reader for New Zealand news feeds.
 package main
 
 import (
@@ -5,30 +6,27 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/kralkapoor/knews/internal/article"
+	"github.com/kralkapoor/knews/internal/config"
+	"github.com/kralkapoor/knews/internal/httpx"
 	"github.com/kralkapoor/knews/internal/rss"
 	"github.com/kralkapoor/knews/internal/ui"
 )
 
-const maxWorkers = 5
-
 func main() {
-	// Initialize RSS feed client and fetcher.
-	// FeedClient handles individual HTTP requests, FeedFetcher coordinates
-	// fetching multiple feeds concurrently using a worker pool.
-	feedClient := rss.NewFeedClient()
-	feedFetcher := rss.NewFeedFetcher(feedClient, maxWorkers)
+	providers := config.Providers()
+	httpClient := httpx.NewClient()
 
-	// Initialize article parser registry with RNZ parser
-	parserRegistry := article.NewParserRegistry()
-	parserRegistry.Register(article.NewRNZParser())
+	feeds := rss.NewFetcher(rss.NewClient(httpClient), 0) // 0: default worker count
 
-	// Initialize article fetcher
-	articleFetcher := article.NewArticleFetcher(parserRegistry)
+	var registry article.Registry
+	for _, p := range providers {
+		if p.FullText {
+			registry.Register(article.ReadabilityParser{Source: p.Name, Hosts: p.Hosts})
+		}
+	}
+	articles := article.NewFetcher(&registry, httpClient)
 
-	// Create and run the UI application
-	model := ui.NewModel(feedFetcher, articleFetcher)
-	p := tea.NewProgram(model, tea.WithAltScreen())
-
+	p := tea.NewProgram(ui.NewModel(providers, feeds, articles), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		log.Fatalf("Error running application: %v", err)
 	}

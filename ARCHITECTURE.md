@@ -1,6 +1,6 @@
 # Knews Architecture
 
-Knews is a terminal-based RSS news reader built in Go using the [Bubble Tea](https://github.com/charmbracelet/bubbletea) TUI framework. It currently supports RNZ (Radio New Zealand) feeds, with an extensible design for adding more providers.
+Knews is a terminal-based RSS news reader built in Go using the [Bubble Tea](https://github.com/charmbracelet/bubbletea) TUI framework. It currently supports RNZ (Radio New Zealand) feeds. Providers are configuration data, so adding a server-rendered news site needs no new code.
 
 ## Table of Contents
 
@@ -11,13 +11,13 @@ Knews is a terminal-based RSS news reader built in Go using the [Bubble Tea](htt
 - [RSS Subsystem](#rss-subsystem)
 - [Article Parsing Subsystem](#article-parsing-subsystem)
 - [UI System](#ui-system)
-- [Full Data Flow](#full-data-flow)
+- [Testing](#testing)
 
 ---
 
 ## High-Level Overview
 
-The application is organised into four internal packages, each with a single responsibility. The main entry point (`knews.go`) wires them together.
+The application is organised into five internal packages, each with a single responsibility. The main entry point (`knews.go`) wires them together.
 
 ```mermaid
 graph TB
@@ -26,7 +26,11 @@ graph TB
     end
 
     subgraph "internal/config"
-        config["Provider registry<br/>Feed URLs & ordering"]
+        config["Provider list<br/>Feeds in display order"]
+    end
+
+    subgraph "internal/httpx"
+        httpx["Shared HTTP GET<br/>User-Agent, timeout, size cap"]
     end
 
     subgraph "internal/rss"
@@ -34,31 +38,35 @@ graph TB
     end
 
     subgraph "internal/article"
-        article["Article fetching & parsing<br/>Parser registry pattern"]
+        article["Article fetching & parsing<br/>Parser registry"]
     end
 
     subgraph "internal/ui"
         ui["Bubble Tea TUI<br/>Screen management"]
     end
 
+    main --> config
     main --> rss
     main --> article
     main --> ui
-    ui --> rss
-    ui --> article
-    ui --> config
-    rss -.->|"RSS XML"| Internet["RSS Feed Servers"]
-    article -.->|"HTML"| Internet2["News Article Pages"]
+    rss --> httpx
+    article --> httpx
+    ui -.->|"feedSource interface"| rss
+    ui -.->|"articleSource interface"| article
+    httpx -.->|"HTTP"| Internet["Feed servers & article pages"]
 ```
 
 **Package responsibilities:**
 
 | Package | Purpose | Key pattern |
 |---------|---------|-------------|
-| `config` | Defines providers, feed URLs, and display ordering | Static registry |
+| `config` | Defines providers and their feeds | Static, ordered list |
+| `httpx` | One hardened HTTP GET shared by the fetchers | Injectable `*http.Client` |
 | `rss` | Fetches and parses RSS XML feeds concurrently | Worker pool |
-| `article` | Fetches full article HTML and extracts readable content | Parser registry |
+| `article` | Fetches article HTML and extracts readable content | Parser registry |
 | `ui` | Terminal interface with screen-based navigation | Bubble Tea Model-Update-View |
+
+`ui` doesn't import the concrete fetchers' constructors or read `config` globals: `main` passes it the provider list plus anything satisfying its small `feedSource` / `articleSource` interfaces, which is what lets the UI tests run against fakes.
 
 ---
 
@@ -69,221 +77,147 @@ knews/
 ├── knews.go                    # Entry point — wires all layers together
 └── internal/
     ├── config/
-    │   ├── types.go            # Provider, FeedConfiguration structs
-    │   ├── feeds.go            # RNZ provider definition & feed URLs
-    │   └── config.go           # Test configuration helper
+    │   └── providers.go        # Feed, Provider, Providers()
+    ├── httpx/
+    │   └── get.go              # Get(), NewClient() — shared HTTP plumbing
     ├── rss/
-    │   ├── types.go            # Rss, Channel, Item, FeedResult, FeedRequest
-    │   ├── client.go           # FeedClient — HTTP fetch + XML parse
-    │   ├── parser.go           # ParseXmlResponse — XML unmarshalling
-    │   └── fetcher.go          # FeedFetcher — concurrent worker pool
+    │   ├── types.go            # RSS, Channel, Item (+ Published), FeedRequest, FeedResult
+    │   ├── parser.go           # Parse — XML decoding with charset support
+    │   ├── client.go           # Client — fetch + parse one feed
+    │   ├── fetcher.go          # Fetcher — concurrent worker pool
+    │   └── testdata/           # RNZ feed fixture
     ├── article/
     │   ├── types.go            # Article struct
-    │   ├── parser.go           # ArticleParser interface, ParserRegistry, ArticleFetcher
-    │   └── rnz_parser.go       # RNZParser — go-readability based extraction
+    │   ├── parser.go           # Parser interface, Registry
+    │   ├── fetcher.go          # Fetcher, ErrNoParser
+    │   ├── readability.go      # ReadabilityParser, ErrNoContent
+    │   └── testdata/           # Article page fixture
     └── ui/
-        ├── model.go            # Root Model — screen routing & message dispatch
-        ├── commands.go         # Async tea.Cmd functions & message types
+        ├── model.go            # Root Model — screen routing, request IDs
+        ├── commands.go         # Source interfaces, async tea.Cmds & messages
         ├── splash.go           # Provider selection screen
         ├── main_view.go        # Two-panel feed/article listing
         ├── article_view.go     # Scrollable article reader
         ├── help.go             # Keybinding help overlay
-        ├── styles.go           # Colour palette & layout helpers
-        └── keybindings.go      # Key definitions & descriptions
+        ├── keybindings.go      # Help screen contents
+        └── styles.go           # Colour palette & layout helpers
 ```
 
 ---
 
 ## Type Diagram
 
-All key types and their relationships across packages:
-
 ```mermaid
 classDiagram
     direction TB
-
-    namespace rss {
-        class FeedClient {
-            +Fetch(ctx, url) []byte, error
-            +FetchAndParse(ctx, url) Rss, error
-        }
-
-        class FeedFetcher {
-            -client *FeedClient
-            -maxWorkers int
-            +FetchAll(ctx, requests) []FeedResult
-            +FetchAllURLs(ctx, urls) []FeedResult
-            +FetchAllFromMap(ctx, feeds) []FeedResult
-            -worker(ctx, requests, results, ch, wg)
-            -fetchSingle(ctx, request) FeedResult
-        }
-
-        class Rss {
-            +Channel Channel
-        }
-
-        class Channel {
-            +Title string
-            +Description string
-            +Link string
-            +Copyright string
-            +Items []Item
-        }
-
-        class Item {
-            +Title string
-            +Description string
-            +PubDate string
-            +Link string
-            +GUID string
-        }
-
-        class FeedRequest {
-            +URL string
-            +Name string
-        }
-
-        class FeedResult {
-            +Feed Rss
-            +SourceURL string
-            +FeedName string
-            +FetchedAt time.Time
-            +Error error
-        }
-    }
-
-    namespace article {
-        class ArticleParser {
-            <<interface>>
-            +Parse(htmlContent, url) *Article, error
-            +CanParse(url) bool
-        }
-
-        class ParserRegistry {
-            -parsers []ArticleParser
-            +Register(parser)
-            +GetParser(url) ArticleParser
-            +Parse(htmlContent, url) *Article, error
-        }
-
-        class ArticleFetcher {
-            -registry *ParserRegistry
-            +Fetch(ctx, url) *Article, error
-        }
-
-        class RNZParser {
-            +Parse(htmlContent, url) *Article, error
-            +CanParse(url) bool
-        }
-
-        class Article {
-            +URL string
-            +Title string
-            +Author string
-            +Content string
-            +PublishedAt time.Time
-            +Source string
-        }
-    }
 
     namespace config {
         class Provider {
             +Name string
             +Description string
-            +Feeds map~string string~
-            +FeedOrder []string
+            +Hosts []string
+            +FullText bool
+            +Feeds []Feed
+        }
+        class Feed {
+            +Name string
+            +URL string
         }
     }
 
-    namespace ui {
-        class Model {
-            -activeScreen screen
-            -splash splashModel
-            -main mainModel
-            -articleView articleModel
-            -help helpModel
-            -feedFetcher *FeedFetcher
-            -articleFetcher *ArticleFetcher
-            +Init() tea.Cmd
-            +Update(msg) tea.Model, tea.Cmd
-            +View() string
+    namespace rss {
+        class Client {
+            +Fetch(ctx, url) RSS, error
         }
-
-        class mainModel {
-            -feedList list.Model
-            -articleList list.Model
-            -focus focusPanel
-            -feedResults map~string FeedResult~
-            -currentFeed string
+        class Fetcher {
+            -client *Client
+            -maxWorkers int
+            +FetchAll(ctx, []FeedRequest) []FeedResult
         }
-
-        class articleModel {
-            -viewport viewport.Model
-            -currentURL string
-            -title string
-            +showLoading(title)
-            +showArticle(article)
-            +showError(title, err)
+        class RSS {
+            +Channel Channel
         }
-
-        class splashModel {
-            -providerList list.Model
+        class Channel {
+            +Title string
+            +Items []Item
         }
-
-        class helpModel {
+        class Item {
+            +Title, Description, PubDate, Link, GUID string
+            +Published() time.Time, bool
+        }
+        class FeedRequest {
+            +Name string
+            +URL string
+        }
+        class FeedResult {
+            +FeedRequest
+            +Feed RSS
+            +Err error
         }
     }
 
-    Rss *-- Channel
+    namespace article {
+        class Parser {
+            <<interface>>
+            +CanParse(url) bool
+            +Parse(html, url) *Article, error
+        }
+        class Registry {
+            -parsers []Parser
+            +Register(Parser)
+        }
+        class ArticleFetcher["Fetcher"] {
+            -registry *Registry
+            +Fetch(ctx, url) *Article, error
+        }
+        class ReadabilityParser {
+            +Source string
+            +Hosts []string
+        }
+        class Article {
+            +URL, Title, Author, Content, Source string
+            +PublishedAt time.Time
+        }
+    }
+
+    Provider *-- Feed
+    RSS *-- Channel
     Channel *-- Item
-    FeedFetcher --> FeedClient : uses
-    FeedFetcher ..> FeedRequest : accepts
-    FeedFetcher ..> FeedResult : returns
-    FeedResult *-- Rss
+    Fetcher --> Client : uses
+    FeedResult *-- FeedRequest
+    FeedResult *-- RSS
 
-    RNZParser ..|> ArticleParser : implements
-    ParserRegistry o-- ArticleParser : contains
-    ArticleFetcher --> ParserRegistry : uses
+    ReadabilityParser ..|> Parser : implements
+    Registry o-- Parser : contains
+    ArticleFetcher --> Registry : uses
     ArticleFetcher ..> Article : returns
-
-    Model --> FeedFetcher : uses
-    Model --> ArticleFetcher : uses
-    Model *-- splashModel
-    Model *-- mainModel
-    Model *-- articleModel
-    Model *-- helpModel
-    mainModel ..> FeedResult : displays
-    mainModel ..> Item : displays
 ```
 
 ---
 
 ## Application Lifecycle
 
-### Startup Sequence
+### Startup
+
+`main()` builds one `http.Client` (30s timeout) and shares it between the feed and article fetchers. It registers one `ReadabilityParser` per provider with `FullText: true`, using the provider's `Hosts`, then hands the provider list and both fetchers to `ui.NewModel`.
 
 ```mermaid
 sequenceDiagram
     participant main as main()
-    participant rss as rss.FeedClient
-    participant fetcher as rss.FeedFetcher
-    participant registry as article.ParserRegistry
-    participant rnz as article.RNZParser
-    participant af as article.ArticleFetcher
+    participant config
+    participant rss
+    participant article
     participant ui as ui.Model
     participant tea as bubbletea.Program
 
-    main->>rss: NewFeedClient()
-    main->>fetcher: NewFeedFetcher(client, 5)
-    main->>registry: NewParserRegistry()
-    main->>rnz: NewRNZParser()
-    main->>registry: Register(rnzParser)
-    main->>af: NewArticleFetcher(registry)
-    main->>ui: NewModel(feedFetcher, articleFetcher)
-    Note over ui: activeScreen = screenSplash
-    main->>tea: NewProgram(model, WithAltScreen())
-    main->>tea: Run()
-    Note over tea: Enters event loop
+    main->>config: Providers()
+    main->>rss: NewFetcher(NewClient(httpClient), 0)
+    loop each FullText provider
+        main->>article: registry.Register(ReadabilityParser{Source, Hosts})
+    end
+    main->>article: NewFetcher(&registry, httpClient)
+    main->>ui: NewModel(providers, feeds, articles)
+    main->>tea: NewProgram(model, WithAltScreen()).Run()
 ```
 
 ### Provider Selection → Feed Loading
@@ -293,215 +227,129 @@ sequenceDiagram
     participant User
     participant Splash as splashModel
     participant Root as Model (root)
-    participant Config as config
-    participant Cmd as fetchFeedsCmd
-    participant Fetcher as FeedFetcher
-    participant Workers as Worker Pool
-    participant Server as RSS Servers
     participant Main as mainModel
+    participant Cmd as fetchFeedsCmd
+    participant Fetcher as rss.Fetcher
 
-    User->>Splash: Enter (select provider)
-    Splash->>Root: providerSelectedMsg{name: "RNZ"}
-    Root->>Config: GetProvider("RNZ")
-    Config-->>Root: Provider{Feeds, FeedOrder}
-    Root->>Main: setFeeds(feedOrder)
-    Note over Root: activeScreen = screenMain
-    Root->>Cmd: fetchFeedsCmd(fetcher, provider)
-
+    User->>Splash: Enter
+    Splash->>Root: providerSelectedMsg{provider}
+    Root->>Main: setFeeds(provider.Feeds)
+    Note over Main: Resets results, cursors and focus,<br/>selects the first feed
+    Root->>Root: feedReqID++, main.loading = true
+    Root->>Cmd: fetchFeedsCmd(feeds, provider.Feeds, reqID)
     Note over Cmd: Runs asynchronously (30s timeout)
-    Cmd->>Fetcher: FetchAllFromMap(ctx, feeds)
-    Fetcher->>Workers: Distribute FeedRequests across workers
-    par Concurrent fetching
-        Workers->>Server: HTTP GET business.xml
-        Workers->>Server: HTTP GET national.xml
-        Workers->>Server: HTTP GET world.xml
-        Note over Workers: ...up to 5 concurrent
+    Cmd->>Fetcher: FetchAll(ctx, requests)
+    Fetcher-->>Cmd: []FeedResult (input order)
+    Cmd->>Root: feedsMsg{reqID, results}
+    alt reqID is current
+        Root->>Main: setFeedResults(results)
+        Note over Main: Re-shows whichever feed the<br/>user has selected meanwhile
+    else superseded
+        Root->>Root: drop
     end
-    Server-->>Workers: XML responses
-    Workers-->>Fetcher: []FeedResult
-    Fetcher-->>Cmd: []FeedResult
-
-    Cmd->>Root: feedsLoadedMsg{results}
-    Root->>Main: setFeedResults(results, firstFeed)
-    Note over Main: Populates feed list & article list
 ```
+
+Refresh (`r`) goes through the same path with `refresh: true`, which adds a "Feeds refreshed" notice. A refresh is ignored while a fetch is already in flight.
 
 ### Article Selection → Content Display
 
 ```mermaid
 sequenceDiagram
     participant User
-    participant Main as mainModel
     participant Root as Model (root)
     participant AView as articleModel
     participant Cmd as fetchArticleCmd
-    participant AF as ArticleFetcher
-    participant Registry as ParserRegistry
-    participant Parser as RNZParser
-    participant Server as News Server
+    participant AF as article.Fetcher
+    participant Parser as ReadabilityParser
 
-    User->>Main: Enter (select article)
-    Main->>Root: openArticleMsg{item}
-    Root->>AView: showLoading(item.Title)
-    Note over Root: activeScreen = screenArticle
-    Root->>Cmd: fetchArticleCmd(fetcher, item)
-
-    Note over Cmd: Runs asynchronously (15s timeout)
-    Cmd->>AF: Fetch(ctx, item.Link)
-    AF->>Registry: GetParser(url)
-    Registry->>Parser: CanParse(url)?
-    Parser-->>Registry: true (contains "rnz.co.nz")
-    Registry-->>AF: RNZParser
-
-    AF->>Server: HTTP GET article page
-    Server-->>AF: HTML response
-    AF->>Parser: Parse(htmlBytes, url)
-    Note over Parser: go-readability extracts<br/>title, author, content, date
-    Parser-->>AF: *Article
-
-    AF-->>Cmd: *Article
-    Cmd->>Root: articleLoadedMsg{article, title}
-    Root->>AView: showArticle(article)
-    Note over AView: Renders content in viewport
+    User->>Root: Enter on article (openArticleMsg)
+    Root->>AView: showLoading(item)
+    Root->>Root: cancel previous fetch, articleReqID++,<br/>new ctx (15s timeout)
+    Root->>Cmd: fetchArticleCmd(ctx, articles, item.Link, reqID)
+    Cmd->>AF: Fetch(ctx, url)
+    AF->>AF: registry picks parser by host<br/>(ErrNoParser if none, no request made)
+    AF->>Parser: Parse(html, url)
+    Parser-->>AF: *Article (or ErrNoContent)
+    Cmd->>Root: articleMsg{reqID, article, err}
+    alt reqID is current
+        Root->>AView: showArticle / showError
+    else user left or opened another article
+        Root->>Root: drop
+    end
 ```
 
-### Feed Refresh
-
-```mermaid
-sequenceDiagram
-    participant User
-    participant Main as mainModel
-    participant Root as Model (root)
-    participant Cmd as refreshFeedsCmd
-    participant Fetcher as FeedFetcher
-
-    User->>Main: Press 'r'
-    Main->>Root: requestRefreshMsg{}
-    Root->>Root: statusMsg = "Refreshing feeds..."
-    Root->>Cmd: refreshFeedsCmd(fetcher, provider)
-    Note over Cmd: Same as fetchFeedsCmd but returns<br/>feedsRefreshedMsg instead
-    Cmd->>Fetcher: FetchAllFromMap(ctx, feeds)
-    Fetcher-->>Cmd: []FeedResult
-    Cmd->>Root: feedsRefreshedMsg{results}
-    Root->>Main: setFeedResults(results, currentFeed)
-    Note over Main: Updates article list,<br/>preserves current feed selection
-```
+Leaving the article view (`q`/`Esc`) cancels the in-flight fetch and bumps `articleReqID`, so a late result can never overwrite a newer article.
 
 ---
 
 ## RSS Subsystem
 
-The RSS subsystem handles fetching and parsing RSS XML feeds with controlled concurrency.
-
-### Worker Pool Architecture
+### Worker Pool
 
 ```mermaid
 graph LR
     subgraph Input
-        R1[FeedRequest 1]
-        R2[FeedRequest 2]
-        R3[FeedRequest 3]
-        R4[FeedRequest 4]
-        R5[FeedRequest 5]
-        R6[FeedRequest 6]
-        R7[FeedRequest 7]
-        R8[FeedRequest 8]
+        R["[]FeedRequest"]
     end
 
-    subgraph "Buffered Channel"
-        CH["requestChannel<br/>(indices)"]
+    subgraph "Buffered channel"
+        CH["pending<br/>(indices)"]
     end
 
-    subgraph "Worker Pool (max 5)"
+    subgraph "Workers (max 5)"
         W1["Worker 1"]
         W2["Worker 2"]
-        W3["Worker 3"]
-        W4["Worker 4"]
-        W5["Worker 5"]
-    end
-
-    subgraph "Per Worker"
-        direction TB
-        FS["fetchSingle()"]
-        FC["FeedClient.FetchAndParse()"]
-        HTTP["HTTP GET"]
-        XML["ParseXmlResponse()"]
-        FS --> FC --> HTTP --> XML
+        W3["..."]
     end
 
     subgraph Output
-        RS["results []FeedResult<br/>(same order as input)"]
+        RS["[]FeedResult<br/>(same order as input)"]
     end
 
-    R1 & R2 & R3 & R4 & R5 & R6 & R7 & R8 --> CH
-    CH --> W1 & W2 & W3 & W4 & W5
-    W1 & W2 & W3 & W4 & W5 --> RS
+    R --> CH
+    CH --> W1 & W2 & W3
+    W1 & W2 & W3 --> RS
 ```
 
 **Key design decisions:**
 
-- **Index-based channel**: The channel carries request indices, not requests. Workers read from the shared `requests` slice and write to the shared `results` slice at matching indices, preserving input order.
-- **Context cancellation**: Each worker checks `ctx.Done()` before processing the next request. If the context is cancelled (e.g. timeout), remaining results are filled with the context error.
-- **Worker count**: `min(maxWorkers, len(requests))` — never spawns more goroutines than there are requests.
+- **Index-based channel**: The channel carries request indices. Each worker writes only the result slots it takes, so results come back in input order with no further locking.
+- **Pre-filled results**: Every slot's `FeedRequest` is filled in before the workers start, so each result always carries its feed's name and URL.
+- **Context cancellation**: Workers keep draining the channel after `ctx` is done, setting `Err = ctx.Err()` for every remaining request instead of fetching it. No result is ever left blank.
+- **Worker count**: `min(maxWorkers, len(requests))`, started with `sync.WaitGroup.Go`.
 
-### RSS Data Flow
+### Parsing
 
-```mermaid
-graph TB
-    URL["Feed URL string"] --> Fetch["FeedClient.Fetch()<br/>HTTP GET → []byte"]
-    Fetch --> Parse["ParseXmlResponse()<br/>xml.Unmarshal"]
-    Parse --> RssStruct["Rss{Channel{Items[]}}"]
-    RssStruct --> Result["FeedResult{<br/>Feed, SourceURL,<br/>FeedName, FetchedAt, Error}"]
-
-    style URL fill:#e8f4f8
-    style Result fill:#e8f4f8
-```
+`rss.Parse` decodes into `RSS`, whose `XMLName` requires an `<rss>` root, so an Atom document fails loudly instead of silently yielding zero items. Non-UTF-8 feeds are converted using their XML declaration. `Item.Published()` parses RFC 822 dates (one- or two-digit days) and ISO 8601.
 
 ---
 
 ## Article Parsing Subsystem
 
-The article subsystem uses the **registry pattern** to support multiple news sources. Each source gets its own parser implementation; the registry dispatches to the right one based on URL.
-
-### Parser Registry Pattern
-
 ```mermaid
 graph TB
-    URL["Article URL"] --> Registry["ParserRegistry.GetParser(url)"]
-    Registry --> Loop{"For each parser:<br/>parser.CanParse(url)?"}
-    Loop -->|"contains rnz.co.nz"| RNZ["RNZParser"]
-    Loop -->|"future: contains stuff.co.nz"| Future["StuffParser"]
-    Loop -->|"no match"| Err["Error: no parser available"]
+    URL["Article URL"] --> Registry["Registry.parserFor(url)"]
+    Registry --> Loop{"For each parser:<br/>CanParse(url)?"}
+    Loop -->|"host is rnz.co.nz<br/>or a subdomain"| RNZ["ReadabilityParser{Source: RNZ}"]
+    Loop -->|"no match"| Err["ErrNoParser"]
 
     RNZ --> Readability["go-readability<br/>(Firefox Reader View algorithm)"]
-    Readability --> Article["Article{<br/>Title, Author,<br/>Content, PublishedAt, Source}"]
-
-    style Future fill:#f0f0f0,stroke-dasharray: 5 5
+    Readability -->|"text found"| Article["Article{Title, Author,<br/>Content, PublishedAt, Source}"]
+    Readability -->|"no text (JS-rendered page)"| NoContent["ErrNoContent"]
 ```
 
-### Article Fetch Sequence
+`CanParse` compares the URL's parsed host, so `https://evil.example/?u=rnz.co.nz` doesn't match.
 
-```mermaid
-graph LR
-    AF["ArticleFetcher.Fetch(ctx, url)"]
-    AF --> GetParser["registry.GetParser(url)"]
-    GetParser --> HTTP["HTTP GET full page HTML"]
-    HTTP --> Parse["parser.Parse(htmlBytes, url)"]
-    Parse --> Art["*Article"]
+**Adding a news source:**
 
-    style AF fill:#e8f4f8
-    style Art fill:#e8f4f8
-```
-
-**Adding a new news source** requires just two steps:
-1. Create a struct implementing `ArticleParser` (the `Parse` and `CanParse` methods)
-2. Register it in `main()`: `parserRegistry.Register(NewMyParser())`
+1. If the site serves articles as plain HTML, add a `Provider` to `internal/config/providers.go` with its `Hosts`, `FullText: true` and `Feeds`. `main` registers a `ReadabilityParser` for it automatically.
+2. If readability can't handle the site, write a type implementing `article.Parser` and register it in `main()`.
 
 ---
 
 ## UI System
 
-The UI uses Bubble Tea's **Model-Update-View** (MVU) architecture — a unidirectional data flow pattern where the model is the single source of truth.
+The UI uses Bubble Tea's **Model-Update-View** architecture. The root `Model` owns one sub-model per screen and routes messages to the active one.
 
 ### Screen State Machine
 
@@ -509,131 +357,61 @@ The UI uses Bubble Tea's **Model-Update-View** (MVU) architecture — a unidirec
 stateDiagram-v2
     [*] --> Splash
 
-    Splash --> Main : providerSelectedMsg
+    Splash --> Main : providerSelectedMsg (Enter)
+    Main --> Article : openArticleMsg (Enter)
+    Article --> Main : closeArticleMsg (q / Esc)
 
-    Main --> Article : openArticleMsg
+    Splash --> Help : showHelpMsg (?)
     Main --> Help : showHelpMsg (?)
+    Article --> Help : showHelpMsg (?)
+    Help --> Splash : closeHelpMsg (any key)
+    Help --> Main : closeHelpMsg (any key)
+    Help --> Article : closeHelpMsg (any key)
 
-    Article --> Main : closeArticleMsg (Esc)
-    Help --> Main : closeHelpMsg (Esc)
-
-    Main --> Main : feedsLoadedMsg
-    Main --> Main : feedsRefreshedMsg
-    Main --> Main : requestRefreshMsg (r)
-
-    Article --> Article : articleLoadedMsg
-    Article --> Article : articleErrorMsg
+    Main --> Main : feedsMsg / requestRefreshMsg (r)
+    Article --> Article : articleMsg / openURLMsg
 ```
 
-### Bubble Tea Update Loop
-
-Every interaction in the UI follows this cycle:
-
-```mermaid
-graph TB
-    Event["User Input / Async Result<br/>(tea.Msg)"] --> Update["Model.Update(msg)"]
-
-    Update --> Global{"Global handler?"}
-    Global -->|"WindowSizeMsg"| Resize["Resize all sub-models"]
-    Global -->|"feedsLoadedMsg"| FeedLoaded["main.setFeedResults()"]
-    Global -->|"articleLoadedMsg"| ArtLoaded["articleView.showArticle()"]
-    Global -->|"providerSelectedMsg"| Navigate["Switch screen + fetchFeedsCmd"]
-    Global -->|"openArticleMsg"| NavArt["Switch screen + fetchArticleCmd"]
-    Global -->|"No match"| Route{"Route by activeScreen"}
-
-    Route -->|screenSplash| SplashUpdate["splash.Update(msg)"]
-    Route -->|screenMain| MainUpdate["main.Update(msg)"]
-    Route -->|screenArticle| ArticleUpdate["articleView.Update(msg)"]
-    Route -->|screenHelp| HelpUpdate["help.Update(msg)"]
-
-    Resize & FeedLoaded & ArtLoaded & Navigate & NavArt --> Return["Return (Model, tea.Cmd)"]
-    SplashUpdate & MainUpdate & ArticleUpdate & HelpUpdate --> Return
-
-    Return --> View["Model.View()"]
-    View --> Render["Render to terminal"]
-    Render -.->|"Next event"| Event
-```
+Help returns to whichever screen opened it. `Ctrl+C` quits from every screen; `q` quits from the splash and main screens. The `bubbles/list` built-in quit keys are disabled so `Esc` never quits.
 
 ### Main View Layout
 
-The main screen uses a two-panel layout with focus management:
-
 ```
-┌──────────────────────────────────────────────────────┐
-│                Knews - NZ News Reader                │  ← Header (titledBox)
-├────────────────────┬─────────────────────────────────┤
-│      Feeds         │         Articles                │
-│  ┌──────────────┐  │  ┌───────────────────────────┐  │
-│  │ ▸ Business   │  │  │ ▸ Article title here      │  │  ← feedList / articleList
-│  │   Country    │  │  │     02 Apr 2026           │  │    (bubbles/list)
-│  │   National   │  │  │   Another article         │  │
-│  │   World      │  │  │     01 Apr 2026           │  │
-│  │   ...        │  │  │   ...                     │  │
-│  └──────────────┘  │  └───────────────────────────┘  │
-│  (22 chars wide)   │  (remaining width)              │
-├────────────────────┴─────────────────────────────────┤
-│ Press ? for help │ q to quit                         │  ← Status bar
-└──────────────────────────────────────────────────────┘
+╭──────────────────────────────────────────────────────╮
+│                Knews - NZ News Reader                │  ← Header
+╰──────────────────────────────────────────────────────╯
+╭─ Feeds ────────────╮╭─ Business ─────────────────────╮
+│ Business           ││ Article title here             │  ← feedList / articleList
+│ Environment        ││   02 Apr 2026                  │    (bubbles/list, custom delegates)
+│ National           ││ Another article title that ... │  ← titles truncated to fit
+│ World              ││   01 Apr 2026                  │
+╰────────────────────╯╰────────────────────────────────╯
+ Press ? for help │ q to quit                              ← Status bar
 ```
 
-- **Tab / h / l**: Toggle focus between feed list and article list
-- **j / k**: Navigate within the focused list
-- **Enter**: Select feed (from feed list) or open article (from article list)
-- Active panel border is highlighted in dark cyan; inactive is gray
+The status bar is derived from state on every render: "Loading feeds..." while a fetch is in flight, otherwise the current feed's error if it has one, otherwise the help hint (plus a transient notice such as "Feeds refreshed").
 
 ### Message Types
 
 | Message | Trigger | Effect |
 |---------|---------|--------|
-| `providerSelectedMsg` | Enter on splash | Load feeds, switch to main screen |
-| `feedsLoadedMsg` | Async feed fetch completes | Populate feed results |
-| `feedsRefreshedMsg` | Async refresh completes | Update feed results, preserve selection |
-| `openArticleMsg` | Enter on article item | Show loading, switch to article screen |
-| `articleLoadedMsg` | Async article fetch completes | Render article in viewport |
-| `articleErrorMsg` | Async article fetch fails | Show error message |
-| `showHelpMsg` | Press `?` | Switch to help screen |
-| `closeArticleMsg` | Press `Esc` on article | Return to main screen |
-| `closeHelpMsg` | Press `Esc` on help | Return to main screen |
-| `requestRefreshMsg` | Press `r` | Re-fetch all feeds |
+| `providerSelectedMsg` | Enter on splash | Reset main view, fetch feeds, switch to main |
+| `feedsMsg` | Feed fetch completes | Store results if `reqID` is current |
+| `requestRefreshMsg` | `r` | Re-fetch feeds unless already loading |
+| `openArticleMsg` | Enter on article | Show loading, start fetch, switch to article |
+| `articleMsg` | Article fetch completes | Show article or error if `reqID` is current |
+| `openURLMsg` | Browser launch finishes | Show an error notice if it failed |
+| `closeArticleMsg` | `q` / `Esc` in article | Cancel fetch, return to main |
+| `showHelpMsg` / `closeHelpMsg` | `?` / any key | Enter / leave help |
 
 ---
 
-## Full Data Flow
+## Testing
 
-End-to-end flow from startup to reading an article:
-
-```mermaid
-graph TB
-    subgraph "1. Startup"
-        Main["main()"] --> Wire["Wire FeedClient → FeedFetcher<br/>Wire RNZParser → Registry → ArticleFetcher"]
-        Wire --> UI["Create Model, run bubbletea"]
-    end
-
-    subgraph "2. Provider Selection"
-        UI --> Splash["Splash screen<br/>User picks 'RNZ'"]
-        Splash --> Config["config.GetProvider('RNZ')<br/>→ 8 feed URLs + ordering"]
-    end
-
-    subgraph "3. Feed Fetching"
-        Config --> FetchCmd["fetchFeedsCmd<br/>(30s timeout)"]
-        FetchCmd --> Pool["FeedFetcher worker pool<br/>up to 5 concurrent HTTP GETs"]
-        Pool --> XMLParse["ParseXmlResponse<br/>for each feed"]
-        XMLParse --> Results["[]FeedResult<br/>with Rss → Channel → []Item"]
-    end
-
-    subgraph "4. Feed Display"
-        Results --> MainView["mainModel<br/>Feed list (left) + Article list (right)"]
-        MainView --> Browse["User browses feeds & articles<br/>Tab/h/l to switch panels, j/k to navigate"]
-    end
-
-    subgraph "5. Article Reading"
-        Browse --> Select["User presses Enter on article"]
-        Select --> ArtCmd["fetchArticleCmd<br/>(15s timeout)"]
-        ArtCmd --> ArtFetch["ArticleFetcher.Fetch()<br/>HTTP GET → HTML"]
-        ArtFetch --> Parse["RNZParser.Parse()<br/>go-readability extraction"]
-        Parse --> ArtView["articleModel viewport<br/>Title, author, date, content"]
-    end
-
-    style Main fill:#e8f4f8
-    style ArtView fill:#e8f4f8
+```sh
+go test -race ./...
 ```
+
+- **`httpx`, `rss`, `article`** use `httptest.Server` via the injectable `*http.Client`. They cover status errors, deadlines, worker-pool ordering, the concurrency limit and cancellation. Fixtures live in each package's `testdata/`.
+- **`config`** checks that provider and feed names are unique and that every URL is a valid https URL.
+- **`ui`** drives the root model with synthetic key messages and fake `feedSource` / `articleSource` implementations, running each returned command the way Bubble Tea would. It includes regression tests for quitting, stale results, cursor handling and layout. `TestViewFillsWindow` asserts that every screen exactly fills the terminal at several sizes.

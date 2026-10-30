@@ -13,45 +13,41 @@ type helpModel struct {
 	height int
 }
 
-func newHelpModel() helpModel {
-	return helpModel{}
+func (h *helpModel) setSize(width, height int) {
+	h.width = width
+	h.height = height
 }
 
 func (h helpModel) Update(msg tea.Msg) (helpModel, tea.Cmd) {
-	switch msg.(type) {
-	case tea.KeyMsg:
+	if _, ok := msg.(tea.KeyMsg); ok {
 		return h, func() tea.Msg { return closeHelpMsg{} }
 	}
 	return h, nil
 }
 
 func (h helpModel) View() string {
-	var b strings.Builder
-
-	b.WriteString(titleStyle.Render("Keyboard Shortcuts"))
-	b.WriteString("\n\n")
-
-	b.WriteString(keyStyle.Render("Navigation:"))
-	b.WriteString("\n")
-	for _, kb := range NavigationBindings() {
-		b.WriteString(fmt.Sprintf("  %-10s %s\n", kb.Key, kb.Description))
+	columns := make([]string, len(helpSections))
+	for i, section := range helpSections {
+		var b strings.Builder
+		b.WriteString(keyStyle.Render(section.title))
+		for _, kb := range section.bindings {
+			fmt.Fprintf(&b, "\n%-8s %s", kb.key, kb.description)
+		}
+		columns[i] = lipgloss.NewStyle().PaddingRight(4).Render(b.String())
 	}
 
-	b.WriteString("\n")
-	b.WriteString(keyStyle.Render("Actions:"))
-	b.WriteString("\n")
-	for _, kb := range ActionBindings() {
-		b.WriteString(fmt.Sprintf("  %-10s %s\n", kb.Key, kb.Description))
-	}
+	content := lipgloss.JoinVertical(lipgloss.Left,
+		titleStyle.Render("Keyboard Shortcuts"),
+		"",
+		lipgloss.JoinHorizontal(lipgloss.Top, columns...),
+		"",
+		metadataStyle.Render("Ctrl+C quits from anywhere."),
+		metadataStyle.Render("Press any key to close."),
+	)
+	content = lipgloss.NewStyle().PaddingLeft(1).Render(content)
 
-	b.WriteString("\n")
-	b.WriteString(metadataStyle.Render("Press any key to close"))
-
-	content := b.String()
-
-	boxWidth := 50
-	boxHeight := lipgloss.Height(content) + 2 // +2 for borders
-	box := titledBox(content, "Help", boxWidth, boxHeight, colorYellow)
-
-	return lipgloss.Place(h.width, h.height, lipgloss.Center, lipgloss.Center, box)
+	box := titledBox(content, "Help", lipgloss.Width(content)+2, lipgloss.Height(content)+2, colorYellow)
+	placed := lipgloss.Place(h.width, h.height, lipgloss.Center, lipgloss.Center, box)
+	// Clip rather than overflow on terminals too small for the box.
+	return lipgloss.NewStyle().MaxWidth(h.width).MaxHeight(h.height).Render(placed)
 }

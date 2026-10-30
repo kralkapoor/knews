@@ -10,6 +10,7 @@ import (
 var (
 	colorDarkCyan = lipgloss.Color("#008b8b")
 	colorGray     = lipgloss.Color("240")
+	colorWhite    = lipgloss.Color("15")
 	colorYellow   = lipgloss.Color("3")
 	colorRed      = lipgloss.Color("1")
 	colorGreen    = lipgloss.Color("2")
@@ -23,66 +24,48 @@ var (
 	errorStyle    = lipgloss.NewStyle().Foreground(colorRed)
 	successStyle  = lipgloss.NewStyle().Foreground(colorGreen)
 	bannerStyle   = lipgloss.NewStyle().Foreground(colorDarkCyan)
+	selectedStyle = lipgloss.NewStyle().Background(colorDarkCyan).Foreground(colorWhite)
 )
 
-// titledBox renders content inside a bordered box with an optional title in
-// the top border, using Unicode box-drawing characters.
+// titledBox renders content inside a width×height bordered box with an
+// optional title in the top border. Content and title are clipped to fit.
 //
 //	╭─ Title ──────────╮
-//	│ content           │
-//	╰───────────────────╯
+//	│ content          │
+//	╰──────────────────╯
 func titledBox(content, title string, width, height int, borderColor lipgloss.Color) string {
 	bc := lipgloss.NewStyle().Foreground(borderColor)
 
 	// Inner width excludes the two border columns ("│" on each side).
-	inner := width - 2
-	if inner < 1 {
-		inner = 1
-	}
+	inner := max(width-2, 1)
 
-	// Build top border
+	// The top border is "╭─", the title padded with a space each side, then
+	// dashes up to "╮". Drop the title entirely if there's no room for it.
+	title = truncateString(title, inner-3)
 	var top string
 	if title != "" {
 		titleStr := " " + title + " "
-		titleRendered := bc.Render(titleStr)
-		dashCount := inner - lipgloss.Width(titleStr)
-		if dashCount < 0 {
-			dashCount = 0
-		}
-		top = bc.Render("╭─") + titleRendered + bc.Render(strings.Repeat("─", dashCount)+"╮")
+		dashCount := max(inner-1-lipgloss.Width(titleStr), 0)
+		top = bc.Render("╭─") + bc.Render(titleStr) + bc.Render(strings.Repeat("─", dashCount)+"╮")
 	} else {
 		top = bc.Render("╭" + strings.Repeat("─", inner) + "╮")
 	}
-
-	// Build bottom border
 	bottom := bc.Render("╰" + strings.Repeat("─", inner) + "╯")
 
-	// Pad/truncate content lines to fill the box
+	// Pad or clip content to the inner height (total minus both borders).
+	innerHeight := max(height-2, 0)
 	contentLines := strings.Split(content, "\n")
-
-	// Inner height is total height minus top and bottom borders
-	innerHeight := height - 2
-	if innerHeight < 0 {
-		innerHeight = 0
-	}
-
-	// Pad or truncate to innerHeight lines
 	for len(contentLines) < innerHeight {
 		contentLines = append(contentLines, "")
 	}
-	if len(contentLines) > innerHeight {
-		contentLines = contentLines[:innerHeight]
-	}
+	contentLines = contentLines[:innerHeight]
 
-	var lines []string
+	clip := lipgloss.NewStyle().MaxWidth(inner)
+	lines := make([]string, 0, innerHeight+2)
 	lines = append(lines, top)
 	for _, line := range contentLines {
-		// Pad line to inner width
-		lineWidth := lipgloss.Width(line)
-		padding := inner - lineWidth
-		if padding < 0 {
-			padding = 0
-		}
+		line = clip.Render(line)
+		padding := max(inner-lipgloss.Width(line), 0)
 		lines = append(lines, bc.Render("│")+line+strings.Repeat(" ", padding)+bc.Render("│"))
 	}
 	lines = append(lines, bottom)
@@ -93,13 +76,31 @@ func titledBox(content, title string, width, height int, borderColor lipgloss.Co
 // statusText builds a status bar string with highlighted keys.
 // parts alternate: normal text, key text, normal text, key text, ...
 func statusText(parts ...string) string {
-	var result string
+	var b strings.Builder
 	for i, part := range parts {
 		if i%2 == 1 {
-			result += keyStyle.Render(part)
+			b.WriteString(keyStyle.Render(part))
 		} else {
-			result += part
+			b.WriteString(part)
 		}
 	}
-	return result
+	return b.String()
+}
+
+// truncateString trims s and shortens it to at most maxLength runes, ending
+// with "..." when there's room. It counts runes rather than bytes so
+// multi-byte characters (e.g. the macrons in te reo Māori) are never split.
+func truncateString(s string, maxLength int) string {
+	s = strings.TrimSpace(s)
+	if maxLength <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= maxLength {
+		return s
+	}
+	if maxLength < 3 {
+		return string(runes[:maxLength])
+	}
+	return string(runes[:maxLength-3]) + "..."
 }

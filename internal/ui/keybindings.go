@@ -1,42 +1,35 @@
 package ui
 
-// Keybinding defines a keyboard shortcut with its description.
-type Keybinding struct {
-	Key         string
-	Description string
+// keybinding describes a keyboard shortcut for the help screen.
+type keybinding struct {
+	key         string
+	description string
 }
 
-// NavigationBindings returns the navigation-related keybindings.
-func NavigationBindings() []Keybinding {
-	return []Keybinding{
-		{Key: "j / ↓", Description: "Move down"},
-		{Key: "k / ↑", Description: "Move up"},
-		{Key: "h / ←", Description: "Focus feed list"},
-		{Key: "l / →", Description: "Focus article list"},
-		{Key: "Tab", Description: "Switch panels"},
-		{Key: "Enter", Description: "Select item / Open article"},
-		{Key: "g", Description: "Go to top (article view)"},
-		{Key: "G", Description: "Go to bottom (article view)"},
-		{Key: "PgUp", Description: "Page up"},
-		{Key: "PgDn", Description: "Page down"},
-	}
+// helpSection is a titled group of keybindings on the help screen.
+type helpSection struct {
+	title    string
+	bindings []keybinding
 }
 
-// ActionBindings returns the action-related keybindings.
-func ActionBindings() []Keybinding {
-	return []Keybinding{
-		{Key: "r", Description: "Refresh feeds"},
-		{Key: "o", Description: "Open article in browser"},
-		{Key: "q", Description: "Quit / Back"},
-		{Key: "?", Description: "Show help"},
-		{Key: "Esc", Description: "Close article view"},
-	}
-}
-
-// AllBindings returns all keybindings grouped by category.
-func AllBindings() map[string][]Keybinding {
-	return map[string][]Keybinding{
-		"Navigation": NavigationBindings(),
-		"Actions":    ActionBindings(),
-	}
+// helpSections lists every shortcut, grouped by the screen it applies to.
+// Ctrl+C, which quits from anywhere, is mentioned in the help footer.
+var helpSections = []helpSection{
+	{"Feeds and articles", []keybinding{
+		{"j/k ↓/↑", "Move"},
+		{"h/l Tab", "Switch panel"},
+		{"Enter", "Open article"},
+		{"r", "Refresh feeds"},
+		{"?", "Help"},
+		{"q", "Quit"},
+	}},
+	{"Article", []keybinding{
+		{"j/k", "Scroll"},
+		{"d/u", "Half page"},
+		{"Space/b", "Page down/up"},
+		{"g/G", "Top/bottom"},
+		{"o", "Open in browser"},
+		{"?", "Help"},
+		{"q/Esc", "Back"},
+	}},
 }

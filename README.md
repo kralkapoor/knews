@@ -8,8 +8,9 @@ reader (using the same readability algorithm as Firefox's Reader View), so you g
 story and nothing else. It's built in Go with the
 [Bubble Tea](https://github.com/charmbracelet/bubbletea) TUI framework.
 
-> Currently supports [RNZ (Radio New Zealand)](https://www.rnz.co.nz). The parser
-> layer is designed to make adding more providers straightforward.
+> Currently supports [RNZ (Radio New Zealand)](https://www.rnz.co.nz). Providers are
+> plain configuration in `internal/config/providers.go`, so adding a server-rendered
+> news site needs no new code.
 
 ## Features
 
@@ -21,7 +22,7 @@ story and nothing else. It's built in Go with the
 
 ## Install
 
-Requires [Go](https://go.dev/dl/) 1.25 or newer.
+Requires [Go](https://go.dev/dl/) 1.26 or newer.
 
 ```sh
 # Build from source
@@ -47,15 +48,21 @@ keybinding list.
 | `Enter`        | Select feed / open article          |
 | `r`            | Refresh feeds                       |
 | `o`            | Open current article in browser     |
+| `d` / `u`      | Half page down / up (reader)        |
+| `Space` / `b`  | Page down / up (reader)             |
 | `g` / `G`      | Jump to top / bottom (reader)       |
 | `?`            | Show help                           |
-| `q` / `Esc`    | Back / quit                         |
+| `q` / `Esc`    | Back to list (reader)               |
+| `q`            | Quit (lists)                        |
+| `Ctrl+C`       | Quit from anywhere                  |
 
 ## Architecture
 
-The codebase is split into four `internal` packages — `config`, `rss`, `article`,
-and `ui` — wired together in `knews.go`. For a detailed walkthrough with diagrams,
-see [ARCHITECTURE.md](ARCHITECTURE.md).
+The codebase is split into five `internal` packages — `config`, `httpx`, `rss`,
+`article`, and `ui` — wired together in `knews.go`. For a detailed walkthrough with
+diagrams, see [ARCHITECTURE.md](ARCHITECTURE.md).
+
+Run the tests with `go test -race ./...`.
 
 ## Ideas to explore
 
@@ -63,8 +70,13 @@ A running list of things I'd like to investigate or build out next.
 
 ### More feeds & providers
 
-- **Stuff** (`stuff.co.nz/rss`) — appears to publish all articles on a single feed.
-- **NZ Herald** — appears to require a subscription.
+- **Stuff** — publishes per-section Atom feeds at `stuff.co.nz/rss/<section>`
+  (`nz-news`, `world-news`, `business`, `politics`, ...), but article pages are
+  rendered client-side, so readability can't extract them. Show the feed summary
+  plus "open in browser" instead.
+- **NZ Herald** — publishes RSS 2.0 at
+  `nzherald.co.nz/arc/outboundfeeds/rss/section/<section>/?outputType=xml`;
+  Premium articles are paywalled.
 - Re-enable the RNZ feeds currently commented out (Sport, Te Ao Māori, Country, etc.).
 
 ### TUI

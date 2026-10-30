@@ -1,16 +1,21 @@
 package rss
 
-import "encoding/xml"
+import (
+	"bytes"
+	"encoding/xml"
 
-// parse xml into a struct
-func ParseXmlResponse(resp []byte) (Rss, error) {
-	var rss Rss
+	"golang.org/x/net/html/charset"
+)
 
-	err := xml.Unmarshal(resp, &rss)
+// Parse decodes an RSS 2.0 document. Documents in encodings other than UTF-8
+// are converted using their XML declaration.
+func Parse(data []byte) (RSS, error) {
+	dec := xml.NewDecoder(bytes.NewReader(data))
+	dec.CharsetReader = charset.NewReaderLabel
 
-	if err != nil {
-		return Rss{}, err
+	var feed RSS
+	if err := dec.Decode(&feed); err != nil {
+		return RSS{}, err
 	}
-
-	return rss, err
+	return feed, nil
 }
