@@ -26,6 +26,18 @@ type Provider struct {
 	Feeds []Feed
 }
 
+const (
+	rnzBase    = "https://www.rnz.co.nz/rss/"
+	stuffBase  = "https://www.stuff.co.nz/rss/"
+	heraldBase = "https://www.nzherald.co.nz/arc/outboundfeeds/rss/section/"
+)
+
+func rnzFeed(name, slug string) Feed   { return Feed{name, rnzBase + slug + ".xml"} }
+func stuffFeed(name, slug string) Feed { return Feed{name, stuffBase + slug} }
+func heraldFeed(name, section string) Feed {
+	return Feed{name, heraldBase + section + "/?outputType=xml"}
+}
+
 var providers = []Provider{
 	{
 		Name:        "RNZ",
@@ -33,18 +45,16 @@ var providers = []Provider{
 		Hosts:       []string{"rnz.co.nz"},
 		FullText:    true,
 		Feeds: []Feed{
-			{"Business", "https://www.rnz.co.nz/rss/business.xml"},
-			// {"Country", "https://www.rnz.co.nz/rss/country.xml"},
-			{"Environment", "https://www.rnz.co.nz/rss/environment.xml"},
-			{"Identity", "https://www.rnz.co.nz/rss/identity.xml"},
-			{"In Depth", "https://www.rnz.co.nz/rss/in-depth.xml"},
-			// {"Indo NZ", "https://www.rnz.co.nz/rss/indonz.xml"},
-			{"Media and Tech", "https://www.rnz.co.nz/rss/media-technology.xml"},
-			{"National", "https://www.rnz.co.nz/rss/national.xml"},
-			{"Political", "https://www.rnz.co.nz/rss/political.xml"},
-			// {"Sport", "https://www.rnz.co.nz/rss/sport.xml"},
-			// {"Te Ao Māori", "https://www.rnz.co.nz/rss/te-manu-korihi.xml"},
-			{"World", "https://www.rnz.co.nz/rss/world.xml"},
+			rnzFeed("Business", "business"),
+			rnzFeed("Country", "country"),
+			rnzFeed("Education", "education"),
+			rnzFeed("Environment", "environment"),
+			rnzFeed("Media and Tech", "media-technology"),
+			rnzFeed("New Zealand", "national"),
+			rnzFeed("Political", "political"),
+			rnzFeed("Sport", "sport"),
+			rnzFeed("Weather", "weather"),
+			rnzFeed("World", "world"),
 		},
 	},
 	{
@@ -53,14 +63,14 @@ var providers = []Provider{
 		Name:        "Stuff",
 		Description: "Stuff (summaries only)",
 		Feeds: []Feed{
-			{"NZ News", "https://www.stuff.co.nz/rss/nz-news"},
-			{"Politics", "https://www.stuff.co.nz/rss/politics"},
-			{"Business", "https://www.stuff.co.nz/rss/business"},
-			{"World", "https://www.stuff.co.nz/rss/world-news"},
-			{"Climate Change", "https://www.stuff.co.nz/rss/climate-change"},
-			{"Sport", "https://www.stuff.co.nz/rss/sport"},
-			{"Travel", "https://www.stuff.co.nz/rss/travel"},
-			{"Opinion", "https://www.stuff.co.nz/rss/opinion"},
+			stuffFeed("NZ News", "nz-news"),
+			stuffFeed("Politics", "politics"),
+			stuffFeed("Business", "business"),
+			stuffFeed("World", "world-news"),
+			stuffFeed("Climate Change", "climate-change"),
+			stuffFeed("Sport", "sport"),
+			stuffFeed("Travel", "travel"),
+			stuffFeed("Opinion", "opinion"),
 		},
 	},
 	{
@@ -70,14 +80,14 @@ var providers = []Provider{
 		Name:        "NZ Herald",
 		Description: "The New Zealand Herald (summaries only)",
 		Feeds: []Feed{
-			{"New Zealand", "https://www.nzherald.co.nz/arc/outboundfeeds/rss/section/nz/?outputType=xml"},
-			{"Politics", "https://www.nzherald.co.nz/arc/outboundfeeds/rss/section/nz/politics/?outputType=xml"},
-			{"Business", "https://www.nzherald.co.nz/arc/outboundfeeds/rss/section/business/?outputType=xml"},
-			{"World", "https://www.nzherald.co.nz/arc/outboundfeeds/rss/section/world/?outputType=xml"},
-			{"Technology", "https://www.nzherald.co.nz/arc/outboundfeeds/rss/section/technology/?outputType=xml"},
-			{"Sport", "https://www.nzherald.co.nz/arc/outboundfeeds/rss/section/sport/?outputType=xml"},
-			{"Entertainment", "https://www.nzherald.co.nz/arc/outboundfeeds/rss/section/entertainment/?outputType=xml"},
-			{"Lifestyle", "https://www.nzherald.co.nz/arc/outboundfeeds/rss/section/lifestyle/?outputType=xml"},
+			heraldFeed("New Zealand", "nz"),
+			heraldFeed("Politics", "nz/politics"),
+			heraldFeed("Business", "business"),
+			heraldFeed("World", "world"),
+			heraldFeed("Technology", "technology"),
+			heraldFeed("Sport", "sport"),
+			heraldFeed("Entertainment", "entertainment"),
+			heraldFeed("Lifestyle", "lifestyle"),
 		},
 	},
 }
