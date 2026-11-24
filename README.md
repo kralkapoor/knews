@@ -75,7 +75,7 @@ A running list of things I'd like to investigate or build out next.
 ### More feeds & providers
 
 - **The Spinoff** — no public RSS feed found yet.
-- Re-enable the RNZ feeds currently commented out (Sport, Te Ao Māori, Country, etc.).
+- More RNZ feeds (e.g. Te Ao Māori).
 
 ### TUI
 

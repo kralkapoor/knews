@@ -1,13 +1,10 @@
 package ui
 
 import (
-	"fmt"
-	"io"
+	"strings"
 
-	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/kralkapoor/knews/internal/config"
 	"github.com/kralkapoor/knews/internal/rss"
 )
 
@@ -26,281 +23,228 @@ const (
 	statusHeight    = 1
 )
 
-// newList returns a list.Model with the built-in title, filter, status bar,
-// help, pagination and quit keys turned off. The screens draw their own
-// chrome and handle quitting themselves.
-func newList(delegate list.ItemDelegate, width, height int) list.Model {
-	l := list.New(nil, delegate, width, height)
-	l.SetShowTitle(false)
-	l.SetShowStatusBar(false)
-	l.SetShowFilter(false)
-	l.SetFilteringEnabled(false)
-	l.SetShowHelp(false)
-	l.SetShowPagination(false)
-	l.DisableQuitKeybindings()
-	return l
-}
-
-// feedItem implements list.Item for the feed category list.
-type feedItem struct {
-	name string
-}
-
-func (f feedItem) FilterValue() string { return f.name }
-
-// feedDelegate renders items in the feed list (single-line, no description).
-type feedDelegate struct {
-	width int
-}
-
-func (d feedDelegate) Height() int                             { return 1 }
-func (d feedDelegate) Spacing() int                            { return 0 }
-func (d feedDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
-
-func (d feedDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
-	fi, ok := item.(feedItem)
-	if !ok {
-		return
-	}
-
-	style := lipgloss.NewStyle()
-	if index == m.Index() {
-		style = selectedStyle.Bold(true)
-	}
-	fmt.Fprint(w, style.PaddingLeft(1).Width(d.width).Render(truncateString(fi.name, d.width-1)))
-}
-
-// articleItem implements list.Item for the article list.
-type articleItem struct {
-	item rss.Item
-}
-
-func (a articleItem) FilterValue() string { return a.item.Title }
-
-// articleDelegate renders items in the article list (title + date).
-type articleDelegate struct {
-	width int
-}
-
-func (d articleDelegate) Height() int                             { return 2 }
-func (d articleDelegate) Spacing() int                            { return 0 }
-func (d articleDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
-
-func (d articleDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
-	ai, ok := item.(articleItem)
-	if !ok {
-		return
-	}
-
-	selected := index == m.Index()
-	base := lipgloss.NewStyle()
-	if selected {
-		base = selectedStyle
-	}
-	titleStyle := base.Bold(selected).PaddingLeft(1)
-	dateStyle := base.PaddingLeft(3)
-	if !selected {
-		dateStyle = dateStyle.Foreground(colorGray)
-	}
-
-	// Truncate rather than letting lipgloss wrap: a wrapped title would make
-	// the item taller than Height() and push the list out of its box.
-	title := titleStyle.Width(d.width).Render(truncateString(ai.item.Title, d.width-1))
-	date := dateStyle.Width(d.width).Render(truncateString(formatPubDate(ai.item), d.width-3))
-	fmt.Fprintf(w, "%s\n%s", title, date)
-}
-
-type mainModel struct {
-	provider    string
-	feedList    list.Model
-	articleList list.Model
+// mainState is everything the two-panel feed/article screen remembers.
+type mainState struct {
 	focus       focusPanel
-	feedResults map[string]rss.FeedResult
-	currentFeed string
-	loading     bool   // a feed fetch is in flight
-	notice      string // transient status message, cleared on the next key
-	width       int
-	height      int
+	feeds       listCursor                // the feed panel's cursor and scroll position
+	articles    listCursor                // the article panel's cursor and scroll position
+	feedResults map[string]rss.FeedResult // fetched feeds, by feed name
+	loading     bool                      // a feed fetch is in flight
+	notice      string                    // transient status message, cleared on the next key
 }
 
-func newMainModel() mainModel {
-	return mainModel{
-		feedList:    newList(feedDelegate{width: feedPanelWidth - 2}, feedPanelWidth-2, 10),
-		articleList: newList(articleDelegate{width: 60}, 60, 10),
+func newMainState() mainState {
+	return mainState{
 		focus:       focusFeedList,
 		feedResults: make(map[string]rss.FeedResult),
 	}
 }
 
-// articleWidth returns the width of the article panel, borders included.
-func (m mainModel) articleWidth() int {
+// currentFeedName returns the name of the feed under the feed cursor, or ""
+// if there are no feeds.
+func (m Model) currentFeedName() string {
+	if m.main.feeds.cursor >= len(m.provider.Feeds) {
+		return ""
+	}
+	return m.provider.Feeds[m.main.feeds.cursor].Name
+}
+
+// currentArticles returns the items of the feed under the feed cursor. It is
+// empty until that feed has been fetched.
+func (m Model) currentArticles() []rss.Item {
+	return m.main.feedResults[m.currentFeedName()].Feed.Items
+}
+
+// articlePanelWidth returns the width of the article panel, borders included.
+func (m Model) articlePanelWidth() int {
 	return max(m.width-feedPanelWidth, minArticleWidth+2)
 }
 
 // panelHeight returns the height of the two list panels, borders included.
-func (m mainModel) panelHeight() int {
+func (m Model) panelHeight() int {
 	return max(m.height-headerHeight-statusHeight, 3)
 }
 
-func (m *mainModel) setSize(width, height int) {
-	m.width = width
-	m.height = height
-
-	listHeight := m.panelHeight() - 2
-
-	feedInner := feedPanelWidth - 2
-	m.feedList.SetSize(feedInner, listHeight)
-	m.feedList.SetDelegate(feedDelegate{width: feedInner})
-
-	articleInner := m.articleWidth() - 2
-	m.articleList.SetSize(articleInner, listHeight)
-	m.articleList.SetDelegate(articleDelegate{width: articleInner})
+// feedRowsVisible returns how many feeds fit in the feed panel: one line
+// each, inside the borders.
+func (m Model) feedRowsVisible() int {
+	return max(m.panelHeight()-2, 1)
 }
 
-// setProvider resets the view for a newly selected provider and lists its
-// feeds. The first feed is selected; its articles appear once setFeedResults
-// is called.
-func (m *mainModel) setProvider(p config.Provider) {
-	m.provider = p.Name
-	feeds := p.Feeds
-	items := make([]list.Item, len(feeds))
-	for i, f := range feeds {
-		items[i] = feedItem{name: f.Name}
-	}
-	m.feedList.SetItems(items)
-	m.feedList.ResetSelected()
-	m.feedResults = make(map[string]rss.FeedResult, len(feeds))
-	m.focus = focusFeedList
-	m.notice = ""
-	m.currentFeed = ""
-	if len(feeds) > 0 {
-		m.selectFeed(feeds[0].Name)
-	}
+// articleRowsVisible returns how many articles fit in the article panel: two
+// lines each (title and date), inside the borders.
+func (m Model) articleRowsVisible() int {
+	return max((m.panelHeight()-2)/2, 1)
 }
 
-// setFeedResults stores fetched feed data and refreshes the current feed's
-// articles.
-func (m *mainModel) setFeedResults(results []rss.FeedResult) {
+// syncMainScroll scrolls both panels just enough to keep their cursors
+// visible. Call it whenever the lists change or the terminal is resized.
+func (m *Model) syncMainScroll() {
+	m.main.feeds.scroll(len(m.provider.Feeds), m.feedRowsVisible())
+	m.main.articles.scroll(len(m.currentArticles()), m.articleRowsVisible())
+}
+
+// setFeedResults stores fetched feed data. The article cursor stays where it
+// is unless the feed now has fewer articles than that.
+func (m *Model) setFeedResults(results []rss.FeedResult) {
 	for _, result := range results {
-		m.feedResults[result.Name] = result
+		m.main.feedResults[result.Name] = result
 	}
-	m.selectFeed(m.currentFeed)
+	if m.main.articles.cursor >= len(m.currentArticles()) {
+		m.main.articles = listCursor{}
+	}
+	m.syncMainScroll()
 }
 
-// selectFeed shows the articles for the named feed. The article cursor moves
-// to the top when the feed changes, and otherwise stays put.
-func (m *mainModel) selectFeed(name string) {
-	result := m.feedResults[name]
-	items := make([]list.Item, len(result.Feed.Channel.Items))
-	for i, item := range result.Feed.Channel.Items {
-		items[i] = articleItem{item: item}
-	}
-	m.articleList.SetItems(items)
-	if name != m.currentFeed || m.articleList.Index() >= len(items) {
-		m.articleList.ResetSelected()
-	}
-	m.currentFeed = name
-}
-
-// status returns the text for the status bar.
-func (m mainModel) status() string {
-	if m.loading {
+// mainStatus returns the text for the status bar.
+func (m Model) mainStatus() string {
+	if m.main.loading {
 		return keyStyle.Render("Loading feeds...")
 	}
-	if err := m.feedResults[m.currentFeed].Err; err != nil {
-		return errorStyle.Render("Error loading "+m.currentFeed+": ") + err.Error()
+
+	name := m.currentFeedName()
+	if err := m.main.feedResults[name].Err; err != nil {
+		return errorStyle.Render("Error loading "+name+": ") + err.Error()
 	}
-	hint := statusText("Press ", "?", " for help │ ", "Esc", " providers │ ", "q", " to quit")
-	if m.notice != "" {
-		return m.notice + " │ " + hint
+
+	hint := "Press " + keyHint("?", "for help") + " │ " + keyHint("Esc", "providers") + " │ " + keyHint("q", "to quit")
+	if m.main.notice != "" {
+		return m.main.notice + " │ " + hint
 	}
 	return hint
 }
 
-func (m mainModel) Update(msg tea.Msg) (mainModel, tea.Cmd) {
-	keyMsg, ok := msg.(tea.KeyMsg)
-	if !ok {
-		return m, nil
-	}
-	m.notice = ""
+// updateMain handles a key press on the feed and article screen.
+func (m *Model) updateMain(key string) tea.Cmd {
+	m.main.notice = ""
 
-	switch keyMsg.String() {
+	switch key {
 	case "tab":
-		m.toggleFocus()
-		return m, nil
+		if m.main.focus == focusFeedList {
+			m.main.focus = focusArticleList
+		} else {
+			m.main.focus = focusFeedList
+		}
 	case "h", "left":
-		m.focus = focusFeedList
-		return m, nil
+		m.main.focus = focusFeedList
 	case "l", "right":
-		m.focus = focusArticleList
-		return m, nil
+		m.main.focus = focusArticleList
 	case "q":
-		return m, tea.Quit
+		return tea.Quit
 	case "esc", "backspace":
-		return m, func() tea.Msg { return backToProvidersMsg{} }
-	case "?":
-		return m, func() tea.Msg { return showHelpMsg{} }
+		// Go back to the provider list. Bumping the request ID drops the
+		// results of any fetch still in flight.
+		m.feedReqID++
+		m.main.loading = false
+		m.activeScreen = screenSplash
 	case "r":
-		return m, func() tea.Msg { return requestRefreshMsg{} }
+		if m.main.loading {
+			return nil
+		}
+		return m.fetchFeeds(true)
 	case "enter":
-		if m.focus == focusFeedList {
-			m.focus = focusArticleList
-			return m, nil
+		if m.main.focus == focusFeedList {
+			m.main.focus = focusArticleList
+			return nil
 		}
-		if item, ok := m.articleList.SelectedItem().(articleItem); ok {
-			return m, func() tea.Msg { return openArticleMsg{item: item.item} }
+		articles := m.currentArticles()
+		if m.main.articles.cursor < len(articles) {
+			return m.openArticle(articles[m.main.articles.cursor])
 		}
-		return m, nil
-	}
-
-	// Forward everything else (j/k/up/down/...) to the focused list.
-	var cmd tea.Cmd
-	if m.focus == focusArticleList {
-		m.articleList, cmd = m.articleList.Update(msg)
-		return m, cmd
-	}
-	prev := m.feedList.Index()
-	m.feedList, cmd = m.feedList.Update(msg)
-	if m.feedList.Index() != prev {
-		if fi, ok := m.feedList.SelectedItem().(feedItem); ok {
-			m.selectFeed(fi.name)
+	default:
+		// Anything else may be a navigation key for the focused list.
+		if m.main.focus == focusArticleList {
+			m.main.articles.handleKey(key, len(m.currentArticles()), m.articleRowsVisible())
+			return nil
+		}
+		before := m.main.feeds.cursor
+		m.main.feeds.handleKey(key, len(m.provider.Feeds), m.feedRowsVisible())
+		if m.main.feeds.cursor != before {
+			// A different feed: show its articles from the top.
+			m.main.articles = listCursor{}
 		}
 	}
-	return m, cmd
+	return nil
 }
 
-func (m mainModel) View() string {
-	headerText := titleStyle.Render("Knews - " + m.provider)
+// feedRow draws one line of the feed panel.
+func feedRow(name string, selected bool, width int) string {
+	style := lipgloss.NewStyle()
+	if selected {
+		style = selectedStyle.Bold(true)
+	}
+	return style.PaddingLeft(1).Width(width).Render(truncateString(name, width-1))
+}
+
+// articleRow draws two lines of the article panel: the title and the date.
+func articleRow(item rss.Item, selected bool, width int) string {
+	base := lipgloss.NewStyle()
+	if selected {
+		base = selectedStyle
+	}
+	titleLineStyle := base.Bold(selected).PaddingLeft(1)
+	dateLineStyle := base.PaddingLeft(3)
+	if !selected {
+		dateLineStyle = dateLineStyle.Foreground(colorGray)
+	}
+
+	// Truncate rather than letting lipgloss wrap: a wrapped title would make
+	// the row taller than two lines and push the list out of its box.
+	title := titleLineStyle.Width(width).Render(truncateString(item.Title, width-1))
+	date := dateLineStyle.Width(width).Render(truncateString(formatPubDate(item), width-3))
+	return title + "\n" + date
+}
+
+func (m Model) viewMain() string {
+	headerText := titleStyle.Render("Knews - " + m.provider.Name)
 	headerContent := lipgloss.PlaceHorizontal(m.width-2, lipgloss.Center, headerText)
 	header := titledBox(headerContent, "", m.width, headerHeight, colorDarkCyan)
 
-	feedBorderColor, articleBorderColor := colorGray, colorGray
-	if m.focus == focusFeedList {
+	feedBorderColor := colorGray
+	articleBorderColor := colorGray
+	if m.main.focus == focusFeedList {
 		feedBorderColor = colorDarkCyan
 	} else {
 		articleBorderColor = colorDarkCyan
 	}
 
 	articleTitle := "Articles"
-	if m.currentFeed != "" {
-		articleTitle = m.currentFeed
+	if m.currentFeedName() != "" {
+		articleTitle = m.currentFeedName()
 	}
 
-	feedBox := titledBox(m.feedList.View(), "Feeds", feedPanelWidth, m.panelHeight(), feedBorderColor)
-	articleBox := titledBox(m.articleList.View(), articleTitle, m.articleWidth(), m.panelHeight(), articleBorderColor)
+	feedInnerWidth := feedPanelWidth - 2
+	articleInnerWidth := m.articlePanelWidth() - 2
+
+	// Feed rows: one line each, starting from the scroll offset.
+	var feedRows []string
+	feeds := m.provider.Feeds
+	lastFeed := min(m.main.feeds.offset+m.feedRowsVisible(), len(feeds))
+	for i := m.main.feeds.offset; i < lastFeed; i++ {
+		feedRows = append(feedRows, feedRow(feeds[i].Name, i == m.main.feeds.cursor, feedInnerWidth))
+	}
+	if len(feedRows) == 0 {
+		feedRows = []string{emptyListText}
+	}
+
+	// Article rows: two lines each, starting from the scroll offset.
+	var articleRows []string
+	articles := m.currentArticles()
+	lastArticle := min(m.main.articles.offset+m.articleRowsVisible(), len(articles))
+	for i := m.main.articles.offset; i < lastArticle; i++ {
+		articleRows = append(articleRows, articleRow(articles[i], i == m.main.articles.cursor, articleInnerWidth))
+	}
+	if len(articleRows) == 0 {
+		articleRows = []string{emptyListText}
+	}
+
+	feedBox := titledBox(strings.Join(feedRows, "\n"), "Feeds", feedPanelWidth, m.panelHeight(), feedBorderColor)
+	articleBox := titledBox(strings.Join(articleRows, "\n"), articleTitle, m.articlePanelWidth(), m.panelHeight(), articleBorderColor)
 	panels := lipgloss.JoinHorizontal(lipgloss.Top, feedBox, articleBox)
 
-	status := lipgloss.NewStyle().MaxWidth(m.width).Render(" " + m.status())
+	status := lipgloss.NewStyle().MaxWidth(m.width).Render(" " + m.mainStatus())
 
 	return lipgloss.JoinVertical(lipgloss.Left, header, panels, status)
-}
-
-func (m *mainModel) toggleFocus() {
-	if m.focus == focusFeedList {
-		m.focus = focusArticleList
-	} else {
-		m.focus = focusFeedList
-	}
 }
 
 // formatPubDate formats an item's publication date for the article list,

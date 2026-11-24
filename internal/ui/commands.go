@@ -17,19 +17,22 @@ const (
 	articleTimeout = 15 * time.Second
 )
 
-// feedSource fetches RSS feeds; *rss.Fetcher implements it.
+// feedSource fetches RSS feeds; *rss.Fetcher implements it. It is an
+// interface only so the tests can swap in a fake.
 type feedSource interface {
 	FetchAll(ctx context.Context, requests []rss.FeedRequest) []rss.FeedResult
 }
 
-// articleSource fetches full articles; *article.Fetcher implements it.
+// articleSource fetches full articles; *article.Fetcher implements it. It is
+// an interface only so the tests can swap in a fake.
 type articleSource interface {
 	Fetch(ctx context.Context, url string) (*article.Article, error)
 }
 
-// Messages returned by async commands. Each carries the request ID it was
-// started with so that results the user has since moved on from can be
-// dropped.
+// Messages returned by the commands below, which do slow work (network
+// requests, launching a browser) in the background. The fetch results carry
+// the request ID they were started with so that results the user has since
+// moved on from can be dropped.
 
 type feedsMsg struct {
 	reqID   int
@@ -87,23 +90,3 @@ func openURLCmd(url string) tea.Cmd {
 		return openURLMsg{err: cmd.Run()}
 	}
 }
-
-// Internal messages for screen transitions.
-
-type providerSelectedMsg struct {
-	provider config.Provider
-}
-
-type openArticleMsg struct {
-	item rss.Item
-}
-
-type showHelpMsg struct{}
-
-type closeArticleMsg struct{}
-
-type backToProvidersMsg struct{}
-
-type closeHelpMsg struct{}
-
-type requestRefreshMsg struct{}

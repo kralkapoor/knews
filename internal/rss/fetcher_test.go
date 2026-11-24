@@ -42,7 +42,7 @@ func newFeedServer(t *testing.T, hits *atomic.Int32) *httptest.Server {
 func TestClientFetch(t *testing.T) {
 	var hits atomic.Int32
 	srv := newFeedServer(t, &hits)
-	client := NewClient(srv.Client())
+	fetcher := NewFetcher(srv.Client())
 
 	tests := []struct {
 		path    string
@@ -54,7 +54,7 @@ func TestClientFetch(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
-			feed, err := client.Fetch(context.Background(), srv.URL+tt.path)
+			feed, err := fetcher.Fetch(context.Background(), srv.URL+tt.path)
 			if tt.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 					t.Fatalf("Fetch() error = %v, want error containing %q", err, tt.wantErr)
@@ -64,15 +64,15 @@ func TestClientFetch(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Fetch() error = %v", err)
 			}
-			if len(feed.Channel.Items) != 16 {
-				t.Errorf("got %d items, want 16", len(feed.Channel.Items))
+			if len(feed.Items) != 16 {
+				t.Errorf("got %d items, want 16", len(feed.Items))
 			}
 		})
 	}
 }
 
 func TestFetchAllEmpty(t *testing.T) {
-	f := NewFetcher(NewClient(nil), 0)
+	f := NewFetcher(nil)
 	if got := f.FetchAll(context.Background(), nil); got != nil {
 		t.Errorf("FetchAll(nil) = %v, want nil", got)
 	}
@@ -81,7 +81,8 @@ func TestFetchAllEmpty(t *testing.T) {
 func TestFetchAllPreservesOrder(t *testing.T) {
 	var hits atomic.Int32
 	srv := newFeedServer(t, &hits)
-	f := NewFetcher(NewClient(srv.Client()), 3)
+	f := NewFetcher(srv.Client())
+	f.MaxWorkers = 3
 
 	// Earlier requests finish last.
 	requests := []FeedRequest{
@@ -126,7 +127,9 @@ func TestFetchAllLimitsConcurrency(t *testing.T) {
 	for i := range requests {
 		requests[i] = FeedRequest{Name: strconv.Itoa(i), URL: srv.URL}
 	}
-	NewFetcher(NewClient(srv.Client()), maxWorkers).FetchAll(context.Background(), requests)
+	f := NewFetcher(srv.Client())
+	f.MaxWorkers = maxWorkers
+	f.FetchAll(context.Background(), requests)
 
 	if got := peak.Load(); got > maxWorkers {
 		t.Errorf("peak concurrency = %d, want <= %d", got, maxWorkers)
@@ -136,7 +139,8 @@ func TestFetchAllLimitsConcurrency(t *testing.T) {
 func TestFetchAllCancelled(t *testing.T) {
 	var hits atomic.Int32
 	srv := newFeedServer(t, &hits)
-	f := NewFetcher(NewClient(srv.Client()), 2)
+	f := NewFetcher(srv.Client())
+	f.MaxWorkers = 2
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

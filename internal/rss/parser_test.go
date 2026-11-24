@@ -19,14 +19,14 @@ func TestParseFixture(t *testing.T) {
 		t.Fatalf("Parse() error = %v", err)
 	}
 
-	if got, want := feed.Channel.Title, "RNZ Politics Headlines"; got != want {
+	if got, want := feed.Title, "RNZ Politics Headlines"; got != want {
 		t.Errorf("channel title = %q, want %q", got, want)
 	}
-	if got, want := len(feed.Channel.Items), 16; got != want {
+	if got, want := len(feed.Items), 16; got != want {
 		t.Fatalf("got %d items, want %d", got, want)
 	}
 
-	first := feed.Channel.Items[0]
+	first := feed.Items[0]
 	want := Item{
 		Title:       "Government seeks urgent advice on how to protect Auckland rockpools",
 		Description: "\n        Whangaparāoa residents claim visitors have stripped local rockpools bare of sealife.\n      ",
@@ -50,10 +50,10 @@ func TestParseAtom(t *testing.T) {
 		t.Fatalf("Parse() error = %v", err)
 	}
 
-	if got, want := feed.Channel.Title, "Stuff - Nz News"; got != want {
+	if got, want := feed.Title, "Stuff - Nz News"; got != want {
 		t.Errorf("channel title = %q, want %q", got, want)
 	}
-	if got, want := len(feed.Channel.Items), 3; got != want {
+	if got, want := len(feed.Items), 3; got != want {
 		t.Fatalf("got %d items, want %d", got, want)
 	}
 
@@ -66,10 +66,10 @@ func TestParseAtom(t *testing.T) {
 		GUID:        link,
 		Author:      "Stuff",
 	}
-	if got := feed.Channel.Items[0]; got != want {
+	if got := feed.Items[0]; got != want {
 		t.Errorf("first item =\n%#v\nwant\n%#v", got, want)
 	}
-	if _, ok := feed.Channel.Items[0].Published(); !ok {
+	if _, ok := feed.Items[0].Published(); !ok {
 		t.Error("Atom published date didn't parse")
 	}
 }
@@ -86,7 +86,7 @@ func TestAtomEntryFallbacks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse() error = %v", err)
 	}
-	item := feed.Channel.Items[0]
+	item := feed.Items[0]
 	if item.Link != "https://example.com/story" {
 		t.Errorf("Link = %q, want the alternate link", item.Link)
 	}
@@ -109,7 +109,7 @@ func TestParseRSSAuthor(t *testing.T) {
 		t.Fatalf("Parse() error = %v", err)
 	}
 
-	items := feed.Channel.Items
+	items := feed.Items
 	if len(items) != 3 {
 		t.Fatalf("got %d items, want 3", len(items))
 	}
@@ -170,7 +170,7 @@ func TestParseNonUTF8(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse() error = %v", err)
 	}
-	if got := feed.Channel.Items[0].Title; got != "Café" {
+	if got := feed.Items[0].Title; got != "Café" {
 		t.Errorf("title = %q, want %q", got, "Café")
 	}
 }

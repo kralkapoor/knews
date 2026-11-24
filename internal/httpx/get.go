@@ -17,8 +17,8 @@ const (
 	// DefaultTimeout bounds a whole request, including reading the body.
 	DefaultTimeout = 30 * time.Second
 
-	// MaxBodyBytes caps how much of a response body Get reads.
-	MaxBodyBytes = 10 << 20
+	// MaxBodyBytes caps how much of a response body Get reads (10 MB).
+	MaxBodyBytes = 10 * 1024 * 1024
 )
 
 // NewClient returns an HTTP client with DefaultTimeout.
@@ -42,8 +42,8 @@ func Get(ctx context.Context, client *http.Client, url string) ([]byte, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		// Drain a little of the body so the connection can be reused.
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+		// Drain a little of the body (64 KB) so the connection can be reused.
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64*1024))
 		return nil, fmt.Errorf("get %s: unexpected status %s", url, resp.Status)
 	}
 

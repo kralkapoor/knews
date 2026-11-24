@@ -32,3 +32,6 @@ go.work.sum
 # .vscode/
 # Added by goreleaser init:
 dist/
+
+# Binary built by `go build` at the repo root
+/knews

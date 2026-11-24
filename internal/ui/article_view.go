@@ -15,82 +15,86 @@ const (
 	dividerMaxWidth = 60
 )
 
-type articleModel struct {
+// articleState is everything the article reader screen remembers.
+type articleState struct {
 	viewport viewport.Model
 	title    string
 	url      string           // page to open with "o"; set even while loading or after an error
 	article  *article.Article // nil while loading
+	loading  bool             // show "Loading article..." instead of an article
 	note     string           // shown after a summary: why it's not the full text
-	message  string           // shown instead of an article: loading text
 	notice   string           // transient status message, cleared on the next key
-	width    int
-	height   int
 }
 
-func newArticleModel() articleModel {
-	return articleModel{viewport: viewport.New(articleMaxWidth, 20)}
+func newArticleState() articleState {
+	return articleState{viewport: viewport.New(articleMaxWidth, 20)}
 }
 
-// contentWidth calculates the readable content width: capped at 80 columns
-// and no more than 3/4 of the terminal width, for comfortable reading.
-func (a articleModel) contentWidth() int {
-	w := min(a.width*3/4, articleMaxWidth)
+// articleContentWidth calculates the readable content width: capped at 80
+// columns and no more than 3/4 of the terminal width, for comfortable reading.
+func articleContentWidth(termWidth int) int {
+	w := min(termWidth*3/4, articleMaxWidth)
 	if w < 40 {
-		w = a.width - 4
+		w = termWidth - 4
 	}
 	return max(w, 1)
 }
 
-func (a *articleModel) setSize(width, height int) {
-	a.width = width
-	a.height = height
-
+// resizeArticleViewport fits the viewport to the terminal and rewraps the
+// text, which was wrapped to the old width.
+func (m *Model) resizeArticleViewport() {
 	// Reserve 1 line for the status bar, 2 for the box borders.
-	a.viewport.Width = a.contentWidth()
-	a.viewport.Height = max(height-3, 1)
-
-	// The text is wrapped to the old width; rewrap it.
-	a.render()
+	m.article.viewport.Width = articleContentWidth(m.width)
+	m.article.viewport.Height = max(m.height-3, 1)
+	m.renderArticleContent()
 }
 
-func (a *articleModel) showLoading(item rss.Item) {
-	a.title = item.Title
-	a.url = item.Link
-	a.article = nil
-	a.message = keyStyle.Render("\n\nLoading article...")
-	a.render()
-	a.viewport.GotoTop()
+func (m *Model) showArticleLoading(item rss.Item) {
+	m.article.title = item.Title
+	m.article.url = item.Link
+	m.article.article = nil
+	m.article.loading = true
+	m.article.note = ""
+	m.renderArticleContent()
+	m.article.viewport.GotoTop()
 }
 
-func (a *articleModel) showArticle(art *article.Article) {
-	a.title = art.Title
-	a.url = art.URL
-	a.article = art
-	a.note = ""
-	a.render()
-	a.viewport.GotoTop()
+// showArticle shows art, followed by note if it isn't empty.
+func (m *Model) showArticle(art *article.Article, note string) {
+	m.article.title = art.Title
+	m.article.url = art.URL
+	m.article.article = art
+	m.article.loading = false
+	m.article.note = note
+	m.renderArticleContent()
+	m.article.viewport.GotoTop()
 }
 
-// showSummary shows an article built from its feed entry rather than the full
-// page, with a note saying why: err is the reason the full text couldn't be
-// loaded, or nil if the provider only offers summaries.
-func (a *articleModel) showSummary(art *article.Article, err error) {
-	a.showArticle(art)
-	a.note = statusText("This is the summary from the feed. Press ", "o", " to read the full article in your browser.")
+// showArticleSummary shows an article built from its feed entry rather than
+// the full page, with a note saying why: err is the reason the full text
+// couldn't be loaded, or nil if the provider only offers summaries.
+func (m *Model) showArticleSummary(art *article.Article, err error) {
+	note := "This is the summary from the feed. Press " + keyHint("o", "to read the full article in your browser.")
 	if err != nil {
-		a.note = errorStyle.Render("Couldn't load the full article: ") + err.Error() + "\n\n" + a.note
+		note = errorStyle.Render("Couldn't load the full article: ") + err.Error() + "\n\n" + note
 	}
-	a.render()
+	m.showArticle(art, note)
 }
 
-// render wraps the current article or message to the content width and loads
-// it into the viewport. The viewport clips long lines rather than wrapping.
-func (a *articleModel) render() {
-	text := a.message
-	if a.article != nil {
-		text = formatArticle(a.article, a.note, a.contentWidth())
+// renderArticleContent wraps the current article (or loading message) to the
+// content width and loads it into the viewport. The viewport clips long lines
+// rather than wrapping them.
+func (m *Model) renderArticleContent() {
+	width := articleContentWidth(m.width)
+
+	text := ""
+	if m.article.loading {
+		text = keyStyle.Render("\n\nLoading article...")
 	}
-	a.viewport.SetContent(lipgloss.NewStyle().Width(a.contentWidth()).Render(text))
+	if m.article.article != nil {
+		text = formatArticle(m.article.article, m.article.note, width)
+	}
+	m.article.viewport.SetContent(lipgloss.NewStyle().Width(width).Render(text))
 }
 
 // formatArticle lays out an article's title, metadata and body as text,
@@ -138,51 +142,54 @@ func formatArticle(art *article.Article, note string, width int) string {
 	return b.String()
 }
 
-func (a articleModel) Update(msg tea.Msg) (articleModel, tea.Cmd) {
+// updateArticle handles the browser-launch result and key presses on the
+// article reader screen.
+func (m *Model) updateArticle(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case openURLMsg:
 		if msg.err != nil {
-			a.notice = errorStyle.Render("Couldn't open browser: " + msg.err.Error())
+			m.article.notice = errorStyle.Render("Couldn't open browser: " + msg.err.Error())
 		}
-		return a, nil
+		return nil
 
 	case tea.KeyMsg:
-		a.notice = ""
+		m.article.notice = ""
 		switch msg.String() {
 		case "q", "esc":
-			return a, func() tea.Msg { return closeArticleMsg{} }
-		case "?":
-			return a, func() tea.Msg { return showHelpMsg{} }
+			// Back to the lists, abandoning any fetch still in flight.
+			m.stopArticleFetch()
+			m.activeScreen = screenMain
+			return nil
 		case "o":
-			if a.url == "" {
-				return a, nil
+			if m.article.url == "" {
+				return nil
 			}
-			return a, openURLCmd(a.url)
+			return openURLCmd(m.article.url)
 		case "g", "home":
-			a.viewport.GotoTop()
-			return a, nil
+			m.article.viewport.GotoTop()
+			return nil
 		case "G", "end":
-			a.viewport.GotoBottom()
-			return a, nil
+			m.article.viewport.GotoBottom()
+			return nil
 		}
 	}
 
 	// The viewport's own keymap handles scrolling: j/k, d/u, space/f/b, pgup/pgdn.
 	var cmd tea.Cmd
-	a.viewport, cmd = a.viewport.Update(msg)
-	return a, cmd
+	m.article.viewport, cmd = m.article.viewport.Update(msg)
+	return cmd
 }
 
-func (a articleModel) View() string {
+func (m Model) viewArticle() string {
 	// Center the viewport content horizontally within the full-width box.
-	vpView := lipgloss.PlaceHorizontal(a.width-2, lipgloss.Center, a.viewport.View())
-	box := titledBox(vpView, a.title, a.width, a.height-statusHeight, colorDarkCyan)
+	vpView := lipgloss.PlaceHorizontal(m.width-2, lipgloss.Center, m.article.viewport.View())
+	box := titledBox(vpView, m.article.title, m.width, m.height-statusHeight, colorDarkCyan)
 
-	status := statusText(" ", "q", " Back │ ", "o", " Open in browser │ ", "j/k", " Scroll")
-	if a.notice != "" {
-		status = " " + a.notice
+	status := " " + keyHint("q", "Back") + " │ " + keyHint("o", "Open in browser") + " │ " + keyHint("j/k", "Scroll")
+	if m.article.notice != "" {
+		status = " " + m.article.notice
 	}
-	status = lipgloss.NewStyle().MaxWidth(a.width).Render(status)
+	status = lipgloss.NewStyle().MaxWidth(m.width).Render(status)
 
 	return lipgloss.JoinVertical(lipgloss.Left, box, status)
 }

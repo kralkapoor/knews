@@ -16,18 +16,20 @@ func main() {
 	providers := config.Providers()
 	httpClient := httpx.NewClient()
 
-	feeds := rss.NewFetcher(rss.NewClient(httpClient), 0) // 0: default worker count
+	feedFetcher := rss.NewFetcher(httpClient)
 
-	var registry article.Registry
+	// Only providers whose article pages can be extracted get full text.
+	var rules []article.HostRule
 	for _, p := range providers {
 		if p.FullText {
-			registry.Register(article.ReadabilityParser{Source: p.Name, Hosts: p.Hosts})
+			rules = append(rules, article.HostRule{Source: p.Name, Hosts: p.Hosts})
 		}
 	}
-	articles := article.NewFetcher(&registry, httpClient)
+	articleFetcher := article.NewFetcher(httpClient, rules)
 
-	p := tea.NewProgram(ui.NewModel(providers, feeds, articles), tea.WithAltScreen())
-	if _, err := p.Run(); err != nil {
+	model := ui.NewModel(providers, feedFetcher, articleFetcher)
+	program := tea.NewProgram(model, tea.WithAltScreen())
+	if _, err := program.Run(); err != nil {
 		log.Fatalf("Error running application: %v", err)
 	}
 }

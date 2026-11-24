@@ -2,36 +2,27 @@
 package rss
 
 import (
-	"encoding/xml"
 	"strings"
 	"time"
 
 	"golang.org/x/net/html"
 )
 
-// RSS is the root element of an RSS 2.0 document. Parse also converts Atom
-// feeds to this form, so the rest of knews handles a single format.
-type RSS struct {
-	XMLName xml.Name `xml:"rss"`
-	Channel Channel  `xml:"channel"`
-}
-
-// Channel contains the metadata and items of an RSS feed.
-type Channel struct {
-	Title       string `xml:"title"`
-	Description string `xml:"description"`
-	Link        string `xml:"link"`
-	Items       []Item `xml:"item"`
+// Feed is a parsed news feed. Both RSS 2.0 and Atom documents are converted
+// to this form, so the rest of knews handles a single format.
+type Feed struct {
+	Title string
+	Items []Item
 }
 
 // Item is a single entry in a feed.
 type Item struct {
-	Title       string `xml:"title"`
-	Description string `xml:"description"` // may contain HTML; see Summary
-	PubDate     string `xml:"pubDate"`
-	Link        string `xml:"link"`
-	GUID        string `xml:"guid"`
-	Author      string `xml:"http://purl.org/dc/elements/1.1/ creator"`
+	Title       string
+	Description string // may contain HTML; see Summary
+	PubDate     string
+	Link        string
+	GUID        string
+	Author      string
 }
 
 // pubDateLayouts are the date formats seen in feeds. RSS specifies RFC 822
@@ -63,6 +54,7 @@ func (i Item) Summary() string {
 	for {
 		switch z.Next() {
 		case html.ErrorToken:
+			// End of the description (or invalid HTML): return what we have.
 			return strings.Join(strings.Fields(b.String()), " ")
 		case html.TextToken:
 			b.Write(z.Text())
@@ -86,6 +78,6 @@ type FeedRequest struct {
 // and Err is meaningful.
 type FeedResult struct {
 	FeedRequest
-	Feed RSS
+	Feed Feed
 	Err  error
 }
