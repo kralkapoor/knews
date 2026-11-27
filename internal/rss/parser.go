@@ -9,33 +9,34 @@ import (
 	"golang.org/x/net/html/charset"
 )
 
-// Parse decodes an RSS 2.0 or Atom document. Atom feeds are converted to RSS
-// form. Documents in encodings other than UTF-8 are converted using their XML
-// declaration.
-func Parse(data []byte) (RSS, error) {
+// Parse decodes an RSS 2.0 or Atom document. Documents in encodings other
+// than UTF-8 are converted using their XML declaration.
+func Parse(data []byte) (Feed, error) {
 	dec := xml.NewDecoder(bytes.NewReader(data))
 	dec.CharsetReader = charset.NewReaderLabel
 
 	root, err := rootElement(dec)
 	if err != nil {
-		return RSS{}, err
+		return Feed{}, err
 	}
 
 	switch root.Name.Local {
 	case "rss":
-		var feed RSS
-		if err := dec.DecodeElement(&feed, &root); err != nil {
-			return RSS{}, err
+		var doc rssDocument
+		if err := dec.DecodeElement(&doc, &root); err != nil {
+			return Feed{}, err
 		}
-		return feed, nil
+		return doc.toFeed(), nil
 	case "feed":
-		var feed atomFeed
-		if err := dec.DecodeElement(&feed, &root); err != nil {
-			return RSS{}, err
+		var doc atomFeed
+		if err := dec.DecodeElement(&doc, &root); err != nil {
+			return Feed{}, err
 		}
-		return feed.toRSS(), nil
+		return doc.toFeed(), nil
 	default:
-		return RSS{}, fmt.Errorf("unsupported feed format <%s>", root.Name.Local)
+		// Any other root is an error, so a feed in an unexpected format fails
+		// loudly instead of showing as empty.
+		return Feed{}, fmt.Errorf("unsupported feed format <%s>", root.Name.Local)
 	}
 }
 
@@ -52,10 +53,47 @@ func rootElement(dec *xml.Decoder) (xml.StartElement, error) {
 	}
 }
 
-// atomFeed is the subset of an Atom (RFC 4287) document knews uses.
+// ---- RSS 2.0 ----
+
+// rssDocument is the root element of an RSS 2.0 document.
+type rssDocument struct {
+	Channel rssChannel `xml:"channel"`
+}
+
+type rssChannel struct {
+	Title string    `xml:"title"`
+	Items []rssItem `xml:"item"`
+}
+
+type rssItem struct {
+	Title       string `xml:"title"`
+	Description string `xml:"description"`
+	PubDate     string `xml:"pubDate"`
+	Link        string `xml:"link"`
+	GUID        string `xml:"guid"`
+	Author      string `xml:"http://purl.org/dc/elements/1.1/ creator"`
+}
+
+func (d rssDocument) toFeed() Feed {
+	items := make([]Item, len(d.Channel.Items))
+	for i, r := range d.Channel.Items {
+		items[i] = Item{
+			Title:       r.Title,
+			Description: r.Description,
+			PubDate:     r.PubDate,
+			Link:        r.Link,
+			GUID:        r.GUID,
+			Author:      r.Author,
+		}
+	}
+	return Feed{Title: d.Channel.Title, Items: items}
+}
+
+// ---- Atom (RFC 4287) ----
+
+// atomFeed is the subset of an Atom document knews uses.
 type atomFeed struct {
 	Title   string      `xml:"title"`
-	Link    []atomLink  `xml:"link"`
 	Entries []atomEntry `xml:"entry"`
 }
 
@@ -78,27 +116,30 @@ type atomPerson struct {
 	Name string `xml:"name"`
 }
 
-func (f atomFeed) toRSS() RSS {
+func (f atomFeed) toFeed() Feed {
 	items := make([]Item, len(f.Entries))
 	for i, e := range f.Entries {
+		// Prefer the published date, but fall back to the updated date.
 		pubDate := e.Published
 		if pubDate == "" {
 			pubDate = e.Updated
 		}
-		authors := make([]string, len(e.Authors))
+
+		authorNames := make([]string, len(e.Authors))
 		for j, a := range e.Authors {
-			authors[j] = a.Name
+			authorNames[j] = a.Name
 		}
+
 		items[i] = Item{
 			Title:       e.Title,
 			Description: e.Summary,
 			PubDate:     pubDate,
 			Link:        alternateLink(e.Links),
 			GUID:        e.ID,
-			Author:      strings.Join(authors, ", "),
+			Author:      strings.Join(authorNames, ", "),
 		}
 	}
-	return RSS{Channel: Channel{Title: f.Title, Link: alternateLink(f.Link), Items: items}}
+	return Feed{Title: f.Title, Items: items}
 }
 
 // alternateLink returns the href of the link pointing at the entry's web

@@ -46,7 +46,7 @@ func titledBox(content, title string, width, height int, borderColor lipgloss.Co
 	if title != "" {
 		titleStr := " " + title + " "
 		dashCount := max(inner-1-lipgloss.Width(titleStr), 0)
-		top = bc.Render("╭─") + bc.Render(titleStr) + bc.Render(strings.Repeat("─", dashCount)+"╮")
+		top = bc.Render("╭─" + titleStr + strings.Repeat("─", dashCount) + "╮")
 	} else {
 		top = bc.Render("╭" + strings.Repeat("─", inner) + "╮")
 	}
@@ -73,18 +73,10 @@ func titledBox(content, title string, width, height int, borderColor lipgloss.Co
 	return strings.Join(lines, "\n")
 }
 
-// statusText builds a status bar string with highlighted keys.
-// parts alternate: normal text, key text, normal text, key text, ...
-func statusText(parts ...string) string {
-	var b strings.Builder
-	for i, part := range parts {
-		if i%2 == 1 {
-			b.WriteString(keyStyle.Render(part))
-		} else {
-			b.WriteString(part)
-		}
-	}
-	return b.String()
+// keyHint renders a key in the highlight colour followed by what it does,
+// e.g. keyHint("q", "Quit") is "q Quit" with the "q" highlighted.
+func keyHint(key, label string) string {
+	return keyStyle.Render(key) + " " + label
 }
 
 // truncateString trims s and shortens it to at most maxLength runes, ending

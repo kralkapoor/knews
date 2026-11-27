@@ -2,14 +2,15 @@
 
 Knews is a terminal-based RSS news reader built in Go using the [Bubble Tea](https://github.com/charmbracelet/bubbletea) TUI framework. It supports RNZ (Radio New Zealand) with full article text, and Stuff and the NZ Herald with headlines and feed summaries. Providers are configuration data, so adding a news site needs no new code.
 
+The codebase aims to be easy to read for beginners while staying idiomatic Go: plain structs and slices, the standard patterns (`switch`, `if err := …; err != nil`, `sync.WaitGroup.Go`), and no abstractions that only have one implementation.
+
 ## Table of Contents
 
 - [High-Level Overview](#high-level-overview)
 - [Project Structure](#project-structure)
-- [Type Diagram](#type-diagram)
 - [Application Lifecycle](#application-lifecycle)
 - [RSS Subsystem](#rss-subsystem)
-- [Article Parsing Subsystem](#article-parsing-subsystem)
+- [Article Subsystem](#article-subsystem)
 - [UI System](#ui-system)
 - [Testing](#testing)
 
@@ -21,52 +22,26 @@ The application is organised into five internal packages, each with a single res
 
 ```mermaid
 graph TB
-    subgraph knews.go
-        main["main()"]
-    end
-
-    subgraph "internal/config"
-        config["Provider list<br/>Feeds in display order<br/>Full text or summaries"]
-    end
-
-    subgraph "internal/httpx"
-        httpx["Shared HTTP GET<br/>User-Agent, timeout, size cap"]
-    end
-
-    subgraph "internal/rss"
-        rss["Feed fetching & parsing<br/>RSS 2.0 + Atom<br/>Worker pool concurrency"]
-    end
-
-    subgraph "internal/article"
-        article["Article fetching & parsing<br/>Parser registry"]
-    end
-
-    subgraph "internal/ui"
-        ui["Bubble Tea TUI<br/>Screen management"]
-    end
-
-    main --> config
+    main["knews.go: main()"] --> config
     main --> rss
     main --> article
     main --> ui
     rss --> httpx
     article --> httpx
-    ui -.->|"feedSource interface"| rss
-    ui -.->|"articleSource interface"| article
-    httpx -.->|"HTTP"| Internet["Feed servers & article pages"]
+    ui -.-> |"feedSource interface"| rss
+    ui -.-> |"articleSource interface"| article
+    httpx -.-> |"HTTP"| Internet["Feed servers and article pages"]
 ```
 
-**Package responsibilities:**
+| Package | Purpose |
+|---------|---------|
+| `config` | Defines providers and their feeds as a plain list |
+| `httpx` | One HTTP GET (User-Agent, timeout, size cap) shared by the fetchers |
+| `rss` | Fetches and parses RSS 2.0 and Atom feeds; fetches many concurrently |
+| `article` | Fetches article pages and extracts readable text |
+| `ui` | The terminal interface (one Bubble Tea model for every screen) |
 
-| Package | Purpose | Key pattern |
-|---------|---------|-------------|
-| `config` | Defines providers and their feeds | Static, ordered list |
-| `httpx` | One hardened HTTP GET shared by the fetchers | Injectable `*http.Client` |
-| `rss` | Fetches and parses RSS 2.0 and Atom feeds concurrently | Worker pool |
-| `article` | Fetches article HTML and extracts readable content | Parser registry |
-| `ui` | Terminal interface with screen-based navigation | Bubble Tea Model-Update-View |
-
-`ui` doesn't import the concrete fetchers' constructors or read `config` globals: `main` passes it the provider list plus anything satisfying its small `feedSource` / `articleSource` interfaces, which is what lets the UI tests run against fakes.
+`ui` only knows the two small `feedSource` / `articleSource` interfaces, which exist so the UI tests can use fakes. `main` passes it the real `*rss.Fetcher` and `*article.Fetcher`.
 
 ---
 
@@ -74,124 +49,29 @@ graph TB
 
 ```
 knews/
-├── knews.go                    # Entry point — wires all layers together
+├── knews.go                    # Entry point: wires everything together
 └── internal/
     ├── config/
     │   └── providers.go        # Feed, Provider, Providers()
     ├── httpx/
-    │   └── get.go              # Get(), NewClient() — shared HTTP plumbing
+    │   └── get.go              # Get(), NewClient()
     ├── rss/
-    │   ├── types.go            # RSS, Channel, Item (+ Published, Summary), FeedRequest, FeedResult
-    │   ├── parser.go           # Parse — RSS/Atom decoding with charset support
-    │   ├── client.go           # Client — fetch + parse one feed
-    │   ├── fetcher.go          # Fetcher — concurrent worker pool
+    │   ├── types.go            # Feed, Item (+ Published, Summary), FeedRequest, FeedResult
+    │   ├── parser.go           # Parse: RSS 2.0 and Atom decoding, charset support
+    │   ├── fetcher.go          # Fetcher: Fetch one feed, FetchAll with a worker pool
     │   └── testdata/           # RNZ, Herald (RSS) and Stuff (Atom) feed fixtures
     ├── article/
-    │   ├── types.go            # Article struct
-    │   ├── parser.go           # Parser interface, Registry
-    │   ├── fetcher.go          # Fetcher, ErrNoParser
-    │   ├── readability.go      # ReadabilityParser, ErrNoContent
+    │   ├── article.go          # Article, HostRule (optional Extract), Fetcher, matchesHost, Extract
     │   └── testdata/           # Article page fixture
     └── ui/
-        ├── model.go            # Root Model — screen routing, request IDs
-        ├── commands.go         # Source interfaces, async tea.Cmds & messages
+        ├── model.go            # Model: state, Update (routing), View, screen changes
+        ├── commands.go         # Background commands (fetch feeds/article, open browser)
         ├── splash.go           # Provider selection screen
-        ├── main_view.go        # Two-panel feed/article listing
-        ├── article_view.go     # Scrollable article reader
-        ├── help.go             # Keybinding help overlay
-        ├── keybindings.go      # Help screen contents
-        └── styles.go           # Colour palette & layout helpers
-```
-
----
-
-## Type Diagram
-
-```mermaid
-classDiagram
-    direction TB
-
-    namespace config {
-        class Provider {
-            +Name string
-            +Description string
-            +Hosts []string
-            +FullText bool
-            +Feeds []Feed
-        }
-        class Feed {
-            +Name string
-            +URL string
-        }
-    }
-
-    namespace rss {
-        class Client {
-            +Fetch(ctx, url) RSS, error
-        }
-        class Fetcher {
-            -client *Client
-            -maxWorkers int
-            +FetchAll(ctx, []FeedRequest) []FeedResult
-        }
-        class RSS {
-            +Channel Channel
-        }
-        class Channel {
-            +Title string
-            +Items []Item
-        }
-        class Item {
-            +Title, Description, PubDate, Link, GUID, Author string
-            +Published() time.Time, bool
-            +Summary() string
-        }
-        class FeedRequest {
-            +Name string
-            +URL string
-        }
-        class FeedResult {
-            +FeedRequest
-            +Feed RSS
-            +Err error
-        }
-    }
-
-    namespace article {
-        class Parser {
-            <<interface>>
-            +CanParse(url) bool
-            +Parse(html, url) *Article, error
-        }
-        class Registry {
-            -parsers []Parser
-            +Register(Parser)
-        }
-        class ArticleFetcher["Fetcher"] {
-            -registry *Registry
-            +Fetch(ctx, url) *Article, error
-        }
-        class ReadabilityParser {
-            +Source string
-            +Hosts []string
-        }
-        class Article {
-            +URL, Title, Author, Content, Source string
-            +PublishedAt time.Time
-        }
-    }
-
-    Provider *-- Feed
-    RSS *-- Channel
-    Channel *-- Item
-    Fetcher --> Client : uses
-    FeedResult *-- FeedRequest
-    FeedResult *-- RSS
-
-    ReadabilityParser ..|> Parser : implements
-    Registry o-- Parser : contains
-    ArticleFetcher --> Registry : uses
-    ArticleFetcher ..> Article : returns
+        ├── main_view.go        # Two-panel feed/article lists with scrolling
+        ├── article_view.go     # Scrollable article reader (bubbles/viewport)
+        ├── help.go             # Keybinding help screen
+        ├── list.go             # listCursor: list keys, cursor and scrolling
+        └── styles.go           # Colours, titledBox, keyHint, truncateString
 ```
 
 ---
@@ -200,188 +80,112 @@ classDiagram
 
 ### Startup
 
-`main()` builds one `http.Client` (30s timeout) and shares it between the feed and article fetchers. It registers one `ReadabilityParser` per provider with `FullText: true`, using the provider's `Hosts`, then hands the provider list and both fetchers to `ui.NewModel`.
-
-```mermaid
-sequenceDiagram
-    participant main as main()
-    participant config
-    participant rss
-    participant article
-    participant ui as ui.Model
-    participant tea as bubbletea.Program
-
-    main->>config: Providers()
-    main->>rss: NewFetcher(NewClient(httpClient), 0)
-    loop each FullText provider
-        main->>article: registry.Register(ReadabilityParser{Source, Hosts})
-    end
-    main->>article: NewFetcher(&registry, httpClient)
-    main->>ui: NewModel(providers, feeds, articles)
-    main->>tea: NewProgram(model, WithAltScreen()).Run()
-```
+`main()` builds one `http.Client` (30s timeout) and shares it between the feed and article fetchers. It creates one `article.HostRule` for each provider with `FullText: true`, using the provider's `Hosts`, then hands the provider list and both fetchers to `ui.NewModel`.
 
 ### Provider Selection → Feed Loading
 
-```mermaid
-sequenceDiagram
-    participant User
-    participant Splash as splashModel
-    participant Root as Model (root)
-    participant Main as mainModel
-    participant Cmd as fetchFeedsCmd
-    participant Fetcher as rss.Fetcher
+1. On the splash screen, the list keys move `providerList`; `Enter` calls `Model.selectProvider`.
+2. `selectProvider` stores the provider, resets the main screen's state, switches to `screenMain` and calls `fetchFeeds`.
+3. `fetchFeeds` bumps `feedReqID`, sets `main.loading` and returns `fetchFeedsCmd`, which runs `FetchAll` in the background (30s timeout).
+4. When it finishes, `Update` receives a `feedsMsg`. If its `reqID` is not the current `feedReqID` the user has moved on, so it is dropped. Otherwise the results are stored by feed name.
 
-    User->>Splash: Enter
-    Splash->>Root: providerSelectedMsg{provider}
-    Root->>Main: setProvider(provider)
-    Note over Main: Resets results, cursors and focus,<br/>selects the first feed
-    Root->>Root: feedReqID++, main.loading = true
-    Root->>Cmd: fetchFeedsCmd(feeds, provider.Feeds, reqID)
-    Note over Cmd: Runs asynchronously (30s timeout)
-    Cmd->>Fetcher: FetchAll(ctx, requests)
-    Fetcher-->>Cmd: []FeedResult (input order)
-    Cmd->>Root: feedsMsg{reqID, results}
-    alt reqID is current
-        Root->>Main: setFeedResults(results)
-        Note over Main: Re-shows whichever feed the<br/>user has selected meanwhile
-    else superseded
-        Root->>Root: drop
-    end
-```
-
-Refresh (`r`) goes through the same path with `refresh: true`, which adds a "Feeds refreshed" notice. A refresh is ignored while a fetch is already in flight.
+Refresh (`r`) goes through `fetchFeeds(true)`, which adds a "Feeds refreshed" notice. A refresh is ignored while a fetch is already in flight.
 
 ### Article Selection → Content Display
 
-For providers with `FullText: false` (Stuff, NZ Herald), opening an article makes no request at all: the root model builds an `Article` from the feed item (`summaryArticle`: title, author, date, plain-text summary) and shows it with a note offering `o` to open the page in a browser. For full-text providers:
+`Model.openArticle` switches to `screenArticle`.
 
-```mermaid
-sequenceDiagram
-    participant User
-    participant Root as Model (root)
-    participant AView as articleModel
-    participant Cmd as fetchArticleCmd
-    participant AF as article.Fetcher
-    participant Parser as ReadabilityParser
+- For providers with `FullText: false` (Stuff, NZ Herald) no request is made. The article is built from the feed item (`summaryArticle`: title, author, date, plain-text summary) with a note offering `o` to open the page in a browser.
+- For full-text providers it shows "Loading article...", bumps `articleReqID`, creates a 15s context and runs `fetchArticleCmd`. The resulting `articleMsg` is dropped if its `reqID` is stale. On success the article is shown; on any error the feed summary is shown together with the error.
 
-    User->>Root: Enter on article (openArticleMsg)
-    Root->>AView: showLoading(item)
-    Root->>Root: cancel previous fetch, articleReqID++,<br/>new ctx (15s timeout)
-    Root->>Cmd: fetchArticleCmd(ctx, articles, item.Link, reqID)
-    Cmd->>AF: Fetch(ctx, url)
-    AF->>AF: registry picks parser by host<br/>(ErrNoParser if none, no request made)
-    AF->>Parser: Parse(html, url)
-    Parser-->>AF: *Article (or ErrNoContent)
-    Cmd->>Root: articleMsg{reqID, article, err}
-    alt reqID is current
-        Root->>AView: showArticle, or showSummary(item, err) on failure
-    else user left or opened another article
-        Root->>Root: drop
-    end
-```
-
-Leaving the article view (`q`/`Esc`) cancels the in-flight fetch and bumps `articleReqID`, so a late result can never overwrite a newer article.
+Leaving the article (`q`/`Esc`) calls `stopArticleFetch`, which cancels the fetch and bumps `articleReqID`, so a late result can never overwrite a newer article.
 
 ---
 
 ## RSS Subsystem
 
-### Worker Pool
-
-```mermaid
-graph LR
-    subgraph Input
-        R["[]FeedRequest"]
-    end
-
-    subgraph "Buffered channel"
-        CH["pending<br/>(indices)"]
-    end
-
-    subgraph "Workers (max 5)"
-        W1["Worker 1"]
-        W2["Worker 2"]
-        W3["..."]
-    end
-
-    subgraph Output
-        RS["[]FeedResult<br/>(same order as input)"]
-    end
-
-    R --> CH
-    CH --> W1 & W2 & W3
-    W1 & W2 & W3 --> RS
-```
-
-**Key design decisions:**
-
-- **Index-based channel**: The channel carries request indices. Each worker writes only the result slots it takes, so results come back in input order with no further locking.
-- **Pre-filled results**: Every slot's `FeedRequest` is filled in before the workers start, so each result always carries its feed's name and URL.
-- **Context cancellation**: Workers keep draining the channel after `ctx` is done, setting `Err = ctx.Err()` for every remaining request instead of fetching it. No result is ever left blank.
-- **Worker count**: `min(maxWorkers, len(requests))`, started with `sync.WaitGroup.Go`.
-
 ### Parsing
 
-`rss.Parse` reads the root element and decodes `<rss>` documents directly or `<feed>` (Atom) documents via `atomFeed.toRSS()`, which maps `summary` → `Description`, `published` (else `updated`) → `PubDate`, the alternate `link` → `Link` and author names → `Author`. Any other root is an error, so a feed in an unexpected format fails loudly instead of showing as empty. RSS `dc:creator` fills `Author`. Non-UTF-8 feeds are converted using their XML declaration.
+`rss.Parse` reads the root element and decodes `<rss>` documents (via the unexported `rssDocument` types) or `<feed>` (Atom) documents (via `atomFeed`). Both are converted to the same `Feed{Title, Items}`, so the rest of knews handles one format. Any other root is an error, so a feed in an unexpected format fails loudly instead of showing as empty. Non-UTF-8 feeds are converted using their XML declaration.
+
+Atom mapping: `summary` → `Description`, `published` (else `updated`) → `PubDate`, the alternate `link` → `Link`, author names → `Author`. RSS `dc:creator` fills `Author`.
 
 `Item.Published()` parses RFC 822 dates (one- or two-digit days) and ISO 8601. `Item.Summary()` strips HTML from the description and collapses whitespace.
 
+### Fetcher and Worker Pool
+
+`Fetcher.Fetch(ctx, url)` downloads and parses one feed. `Fetcher.FetchAll(ctx, requests)` fetches many at once:
+
+- The indices of the requests are put on a buffered channel; up to `MaxWorkers` (default 5, never more than there are requests) goroutines take indices from it.
+- Each worker writes only to the result slots it takes, so results come back in input order with no locking.
+- Every result's `Name` and `URL` are filled in before the workers start, so a failed result still says which feed it is for.
+- If `ctx` is done, workers keep draining the channel, setting `Err = ctx.Err()` for each remaining request instead of fetching it. No result is ever left blank.
+
 ---
 
-## Article Parsing Subsystem
+## Article Subsystem
 
-```mermaid
-graph TB
-    URL["Article URL"] --> Registry["Registry.parserFor(url)"]
-    Registry --> Loop{"For each parser:<br/>CanParse(url)?"}
-    Loop -->|"host is rnz.co.nz<br/>or a subdomain"| RNZ["ReadabilityParser{Source: RNZ}"]
-    Loop -->|"no match"| Err["ErrNoParser"]
+`article.Fetcher` is created with a list of `HostRule{Source, Hosts}`. `Fetch(ctx, url)`:
 
-    RNZ --> Readability["go-readability<br/>(Firefox Reader View algorithm)"]
-    Readability -->|"text found"| Article["Article{Title, Author,<br/>Content, PublishedAt, Source}"]
-    Readability -->|"no text (JS-rendered page)"| NoContent["ErrNoContent"]
-```
+1. Looks for a rule whose hosts match the URL (`matchesHost`). If none matches it returns `ErrUnsupportedHost` without making a request.
+2. Downloads the page with `httpx.Get`.
+3. Calls the rule's `Extract` function if it has one, otherwise the package's `Extract(html, url, source)`, which runs [go-readability](https://codeberg.org/readeck/go-readability) (the algorithm behind Firefox's Reader View) and returns an `Article`, or `ErrNoContent` if the page has no text (for example JavaScript-rendered pages).
 
-`CanParse` compares the URL's parsed host, so `https://evil.example/?u=rnz.co.nz` doesn't match.
+`matchesHost` compares the URL's parsed host (a host matches itself and its subdomains), so `https://evil.example/?u=rnz.co.nz` doesn't match `rnz.co.nz`.
 
 **Adding a news source:** add a `Provider` to `internal/config/providers.go` with its `Feeds` (RSS 2.0 or Atom).
 
-- If the site serves article text as plain HTML, set `FullText: true` and its `Hosts`. `main` registers a `ReadabilityParser` for it automatically.
+- If the site serves article text as plain HTML, set `FullText: true` and its `Hosts`. `main` creates the host rule automatically.
 - If it doesn't (client-side rendering, a paywall), leave `FullText` false and readers get the feed summary.
-- For a site readability handles badly but which does serve its text, write a type implementing `article.Parser` and register it in `main()`.
-
-Even for full-text providers, if a fetch fails (network error, `ErrNoContent`, `ErrNoParser`), the UI falls back to the summary and shows the error.
+- For a site readability handles badly but which does serve its text, write a function with the same signature as `article.Extract` and set it as that host rule's `Extract` in `main()`.
 
 ---
 
 ## UI System
 
-The UI uses Bubble Tea's **Model-Update-View** architecture. The root `Model` owns one sub-model per screen and routes messages to the active one.
+The UI uses Bubble Tea's Model-Update-View architecture with a **single root `Model`** that holds the state of every screen. `Update` handles a message and `View` draws whichever screen is active.
 
-### Screen State Machine
+### Screens
 
 ```mermaid
 stateDiagram-v2
     [*] --> Splash
-
-    Splash --> Main : providerSelectedMsg (Enter)
-    Main --> Splash : backToProvidersMsg (Esc / Backspace)
-    Main --> Article : openArticleMsg (Enter)
-    Article --> Main : closeArticleMsg (q / Esc)
-
-    Splash --> Help : showHelpMsg (?)
-    Main --> Help : showHelpMsg (?)
-    Article --> Help : showHelpMsg (?)
-    Help --> Splash : closeHelpMsg (any key)
-    Help --> Main : closeHelpMsg (any key)
-    Help --> Article : closeHelpMsg (any key)
-
-    Main --> Main : feedsMsg / requestRefreshMsg (r)
-    Article --> Article : articleMsg / openURLMsg
+    Splash --> Main : Enter (selectProvider)
+    Main --> Splash : Esc / Backspace
+    Main --> Article : Enter on an article (openArticle)
+    Article --> Main : q / Esc
+    Splash --> Help : ?
+    Main --> Help : ?
+    Article --> Help : ?
+    Help --> Splash : any key
+    Help --> Main : any key
+    Help --> Article : any key
 ```
 
-Help returns to whichever screen opened it. `Ctrl+C` quits from every screen; `q` quits from the splash and main screens. The `bubbles/list` built-in quit keys are disabled so `Esc` never quits. Going back to the provider list bumps `feedReqID`, so an in-flight fetch for the old provider is dropped. Picking a provider resets the feed results, cursors and focus.
+Help returns to whichever screen opened it (`helpReturn`).
+
+### How a key press is handled
+
+`Model.handleKey` in `model.go` is the one place to start reading:
+
+1. `Ctrl+C` quits, whatever the screen.
+2. On the help screen, any key goes back to `helpReturn`.
+3. `?` opens help.
+4. Otherwise the key goes to `updateSplash`, `updateMain` or `updateArticle`, depending on `activeScreen`.
+
+Screen changes are plain assignments (`m.activeScreen = screenMain`). Bubble Tea commands are only used for work that takes time.
+
+### Background messages
+
+| Message | Started by | Effect |
+|---------|-----------|--------|
+| `feedsMsg` | `fetchFeedsCmd` | Store the results if `reqID` is current |
+| `articleMsg` | `fetchArticleCmd` | Show the article, or summary + error, if `reqID` is current |
+| `openURLMsg` | `openURLCmd` | Show an error notice if the browser failed to launch |
+
+### Lists and scrolling
+
+The provider, feed and article lists are plain slices drawn with `for` loops. Each list keeps a `listCursor` (in `list.go`): a **cursor** (the highlighted row) and an **offset** (the first row drawn). `listCursor.handleKey` handles the list keys for all three lists: `j`/`k`/arrows, `d`/`u`/`f`/`b`/PgDn/PgUp (a screenful) and `g`/`G`/Home/End (top/bottom). It then scrolls the minimum needed to keep the cursor visible (`adjustScrollOffset`). `syncMainScroll` re-scrolls both main panels after a list change or resize, using `feedRowsVisible` / `articleRowsVisible` as the page sizes. An empty list shows "No items.". `bubbles/viewport` is used only for the article text.
 
 ### Main View Layout
 
@@ -390,8 +194,8 @@ Help returns to whichever screen opened it. `Ctrl+C` quits from every screen; `q
 │                    Knews - RNZ                       │  ← Header (provider name)
 ╰──────────────────────────────────────────────────────╯
 ╭─ Feeds ────────────╮╭─ Business ─────────────────────╮
-│ Business           ││ Article title here             │  ← feedList / articleList
-│ Environment        ││   02 Apr 2026                  │    (bubbles/list, custom delegates)
+│ Business           ││ Article title here             │  ← feeds / articles
+│ Environment        ││   02 Apr 2026                  │
 │ National           ││ Another article title that ... │  ← titles truncated to fit
 │ World              ││   01 Apr 2026                  │
 ╰────────────────────╯╰────────────────────────────────╯
@@ -399,20 +203,6 @@ Help returns to whichever screen opened it. `Ctrl+C` quits from every screen; `q
 ```
 
 The status bar is derived from state on every render: "Loading feeds..." while a fetch is in flight, otherwise the current feed's error if it has one, otherwise the help hint (plus a transient notice such as "Feeds refreshed").
-
-### Message Types
-
-| Message | Trigger | Effect |
-|---------|---------|--------|
-| `providerSelectedMsg` | Enter on splash | Reset main view, fetch feeds, switch to main |
-| `backToProvidersMsg` | `Esc` / `Backspace` on main | Drop in-flight feed fetch, return to splash |
-| `feedsMsg` | Feed fetch completes | Store results if `reqID` is current |
-| `requestRefreshMsg` | `r` | Re-fetch feeds unless already loading |
-| `openArticleMsg` | Enter on article | Show summary, or show loading and start fetch (full-text providers) |
-| `articleMsg` | Article fetch completes | Show article, or summary + error, if `reqID` is current |
-| `openURLMsg` | Browser launch finishes | Show an error notice if it failed |
-| `closeArticleMsg` | `q` / `Esc` in article | Cancel fetch, return to main |
-| `showHelpMsg` / `closeHelpMsg` | `?` / any key | Enter / leave help |
 
 ---
 
@@ -422,6 +212,6 @@ The status bar is derived from state on every render: "Loading feeds..." while a
 go test -race ./...
 ```
 
-- **`httpx`, `rss`, `article`** use `httptest.Server` via the injectable `*http.Client`. They cover status errors, deadlines, worker-pool ordering, the concurrency limit and cancellation. Fixtures live in each package's `testdata/`.
+- **`httpx`, `rss`, `article`** use `httptest.Server`. They cover status errors, deadlines, worker-pool ordering, the concurrency limit and cancellation. Fixtures live in each package's `testdata/`.
 - **`config`** checks that provider and feed names are unique and that every URL is a valid https URL.
-- **`ui`** drives the root model with synthetic key messages and fake `feedSource` / `articleSource` implementations, running each returned command the way Bubble Tea would. It includes regression tests for quitting, stale results, cursor handling and layout. `TestViewFillsWindow` asserts that every screen exactly fills the terminal at several sizes.
+- **`ui`** drives the root model with synthetic key messages and fake `feedSource` / `articleSource` implementations, running each returned command the way Bubble Tea would. It includes regression tests for quitting, stale results, cursor handling, list scrolling and layout. `TestViewFillsWindow` asserts that every screen exactly fills the terminal at several sizes.

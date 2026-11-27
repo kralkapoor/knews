@@ -20,18 +20,26 @@ const (
 	screenHelp
 )
 
-// Model is the root bubbletea model for the application.
+// Model is the root bubbletea model for the application. It holds the state
+// of every screen; only activeScreen is shown at a time.
 type Model struct {
 	activeScreen screen
 	helpReturn   screen // screen to go back to when help closes
-	splash       splashModel
-	main         mainModel
-	articleView  articleModel
-	help         helpModel
+	width        int    // terminal size
+	height       int
+
+	// Splash screen: the providers on offer and the highlighted one.
+	providers    []config.Provider
+	providerList listCursor
+
+	// The provider the user picked; zero until they pick one.
+	provider config.Provider
+
+	main    mainState
+	article articleState
 
 	feeds    feedSource
 	articles articleSource
-	provider config.Provider // zero until the user picks one
 
 	// Request IDs of the latest feed and article fetches. Results carrying
 	// any other ID are stale and dropped.
@@ -46,9 +54,9 @@ type Model struct {
 func NewModel(providers []config.Provider, feeds feedSource, articles articleSource) Model {
 	return Model{
 		activeScreen: screenSplash,
-		splash:       newSplashModel(providers),
-		main:         newMainModel(),
-		articleView:  newArticleModel(),
+		providers:    providers,
+		main:         newMainState(),
+		article:      newArticleState(),
 		feeds:        feeds,
 		articles:     articles,
 	}
@@ -61,24 +69,22 @@ func (m Model) Init() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.splash.setSize(msg.Width, msg.Height)
-		m.main.setSize(msg.Width, msg.Height)
-		m.articleView.setSize(msg.Width, msg.Height)
-		m.help.setSize(msg.Width, msg.Height)
+		m.width = msg.Width
+		m.height = msg.Height
+		m.syncMainScroll()
+		m.resizeArticleViewport()
 		return m, nil
 
 	case tea.KeyMsg:
-		if msg.Type == tea.KeyCtrlC {
-			return m, tea.Quit
-		}
+		return m.handleKey(msg)
 
-	// Async results — handled regardless of the active screen.
+	// Results of background work, handled whichever screen is showing.
 	case feedsMsg:
 		if msg.reqID != m.feedReqID {
 			return m, nil
 		}
 		m.main.loading = false
-		m.main.setFeedResults(msg.results)
+		m.setFeedResults(msg.results)
 		if msg.refresh {
 			m.main.notice = successStyle.Render("Feeds refreshed")
 		}
@@ -94,67 +100,50 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.err != nil || msg.article == nil {
 			// Fall back to what the feed says about the article.
-			m.articleView.showSummary(summaryArticle(msg.item, m.provider.Name), msg.err)
+			m.showArticleSummary(summaryArticle(msg.item, m.provider.Name), msg.err)
 			return m, nil
 		}
-		m.articleView.showArticle(msg.article)
+		m.showArticle(msg.article, "")
 		return m, nil
 
-	// Screen transitions.
-	case providerSelectedMsg:
-		m.provider = msg.provider
-		m.main.setProvider(msg.provider)
-		m.activeScreen = screenMain
-		return m, m.fetchFeeds(false)
-
-	case backToProvidersMsg:
-		// Drop the results of any fetch still in flight.
-		m.feedReqID++
-		m.main.loading = false
-		m.activeScreen = screenSplash
-		return m, nil
-
-	case requestRefreshMsg:
-		if m.main.loading {
-			return m, nil
+	case openURLMsg:
+		if m.activeScreen == screenArticle {
+			return m, m.updateArticle(msg)
 		}
-		return m, m.fetchFeeds(true)
+	}
+	return m, nil
+}
 
-	case openArticleMsg:
-		m.activeScreen = screenArticle
-		if !m.provider.FullText {
-			m.articleView.showSummary(summaryArticle(msg.item, m.provider.Name), nil)
-			return m, nil
-		}
-		m.articleView.showLoading(msg.item)
-		return m, m.fetchArticle(msg.item)
+// handleKey routes a key press: first the keys that work on every screen,
+// then the keys of the active screen.
+func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.Type == tea.KeyCtrlC {
+		return m, tea.Quit
+	}
 
-	case closeArticleMsg:
-		m.stopArticleFetch()
-		m.activeScreen = screenMain
-		return m, nil
-
-	case showHelpMsg:
-		m.helpReturn = m.activeScreen
-		m.activeScreen = screenHelp
-		return m, nil
-
-	case closeHelpMsg:
+	// Any key closes the help screen.
+	if m.activeScreen == screenHelp {
 		m.activeScreen = m.helpReturn
 		return m, nil
 	}
 
-	// Route everything else to the active screen.
+	if msg.String() == "?" {
+		// Like any other key, "?" clears the screen's transient notice.
+		m.main.notice = ""
+		m.article.notice = ""
+		m.helpReturn = m.activeScreen
+		m.activeScreen = screenHelp
+		return m, nil
+	}
+
 	var cmd tea.Cmd
 	switch m.activeScreen {
 	case screenSplash:
-		m.splash, cmd = m.splash.Update(msg)
+		cmd = m.updateSplash(msg.String())
 	case screenMain:
-		m.main, cmd = m.main.Update(msg)
+		cmd = m.updateMain(msg.String())
 	case screenArticle:
-		m.articleView, cmd = m.articleView.Update(msg)
-	case screenHelp:
-		m.help, cmd = m.help.Update(msg)
+		cmd = m.updateArticle(msg)
 	}
 	return m, cmd
 }
@@ -162,15 +151,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) View() string {
 	switch m.activeScreen {
 	case screenSplash:
-		return m.splash.View()
+		return m.viewSplash()
 	case screenMain:
-		return m.main.View()
+		return m.viewMain()
 	case screenArticle:
-		return m.articleView.View()
+		return m.viewArticle()
 	case screenHelp:
-		return m.help.View()
+		return renderHelpView(m.width, m.height)
 	}
 	return ""
+}
+
+// selectProvider switches to the main screen for p and starts fetching its
+// feeds.
+func (m *Model) selectProvider(p config.Provider) tea.Cmd {
+	m.provider = p
+	m.main = newMainState()
+	m.activeScreen = screenMain
+	return m.fetchFeeds(false)
+}
+
+// openArticle switches to the article screen for item. Full-text providers
+// start fetching the page; others show the feed's summary straight away.
+func (m *Model) openArticle(item rss.Item) tea.Cmd {
+	m.activeScreen = screenArticle
+	if !m.provider.FullText {
+		m.showArticleSummary(summaryArticle(item, m.provider.Name), nil)
+		return nil
+	}
+	m.showArticleLoading(item)
+	return m.fetchArticle(item)
 }
 
 // fetchFeeds starts fetching the selected provider's feeds, superseding any

@@ -40,12 +40,9 @@ func TestTruncateString(t *testing.T) {
 	}
 }
 
-func TestStatusText(t *testing.T) {
-	if got, want := statusText("Press ", "q", " to quit"), "Press q to quit"; got != want {
-		t.Errorf("statusText() = %q, want %q", got, want)
-	}
-	if got := statusText(); got != "" {
-		t.Errorf("statusText() = %q, want empty", got)
+func TestKeyHint(t *testing.T) {
+	if got, want := keyHint("q", "to quit"), "q to quit"; got != want {
+		t.Errorf("keyHint() = %q, want %q", got, want)
 	}
 }
 
@@ -78,9 +75,8 @@ func TestContentWidth(t *testing.T) {
 		{200, 80},
 	}
 	for _, tt := range tests {
-		a := articleModel{width: tt.width}
-		if got := a.contentWidth(); got != tt.want {
-			t.Errorf("contentWidth() at width %d = %d, want %d", tt.width, got, tt.want)
+		if got := articleContentWidth(tt.width); got != tt.want {
+			t.Errorf("articleContentWidth() at width %d = %d, want %d", tt.width, got, tt.want)
 		}
 	}
 }

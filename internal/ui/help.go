@@ -4,28 +4,49 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
-type helpModel struct {
-	width  int
-	height int
+// keybinding describes a keyboard shortcut for the help screen.
+type keybinding struct {
+	key         string
+	description string
 }
 
-func (h *helpModel) setSize(width, height int) {
-	h.width = width
-	h.height = height
+// helpSection is a titled group of keybindings on the help screen.
+type helpSection struct {
+	title    string
+	bindings []keybinding
 }
 
-func (h helpModel) Update(msg tea.Msg) (helpModel, tea.Cmd) {
-	if _, ok := msg.(tea.KeyMsg); ok {
-		return h, func() tea.Msg { return closeHelpMsg{} }
-	}
-	return h, nil
+// helpSections lists every shortcut, grouped by the screen it applies to.
+// Ctrl+C, which quits from anywhere, is mentioned in the help footer.
+var helpSections = []helpSection{
+	{"Feeds and articles", []keybinding{
+		{"j/k ↓/↑", "Move"},
+		{"d/u", "Page down/up"},
+		{"g/G", "Top/bottom"},
+		{"h/l Tab", "Switch panel"},
+		{"Enter", "Open article"},
+		{"r", "Refresh feeds"},
+		{"Esc", "Providers"},
+		{"?", "Help"},
+		{"q", "Quit"},
+	}},
+	{"Article", []keybinding{
+		{"j/k", "Scroll"},
+		{"d/u", "Half page"},
+		{"Space/b", "Page down/up"},
+		{"g/G", "Top/bottom"},
+		{"o", "Open in browser"},
+		{"?", "Help"},
+		{"q/Esc", "Back"},
+	}},
 }
 
-func (h helpModel) View() string {
+// renderHelpView draws the keybinding help box in the middle of a
+// width×height screen.
+func renderHelpView(width, height int) string {
 	columns := make([]string, len(helpSections))
 	for i, section := range helpSections {
 		var b strings.Builder
@@ -47,7 +68,7 @@ func (h helpModel) View() string {
 	content = lipgloss.NewStyle().PaddingLeft(1).Render(content)
 
 	box := titledBox(content, "Help", lipgloss.Width(content)+2, lipgloss.Height(content)+2, colorYellow)
-	placed := lipgloss.Place(h.width, h.height, lipgloss.Center, lipgloss.Center, box)
+	placed := lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
 	// Clip rather than overflow on terminals too small for the box.
-	return lipgloss.NewStyle().MaxWidth(h.width).MaxHeight(h.height).Render(placed)
+	return lipgloss.NewStyle().MaxWidth(width).MaxHeight(height).Render(placed)
 }

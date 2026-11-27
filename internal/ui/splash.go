@@ -1,10 +1,8 @@
 package ui
 
 import (
-	"fmt"
-	"io"
+	"strings"
 
-	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/kralkapoor/knews/internal/config"
@@ -21,27 +19,35 @@ const knewsBanner = `
 888    \ |    Y888 888___      Y  Y      \__88P'
 `
 
-// providerItem implements list.Item for the provider selection list.
-type providerItem struct {
-	provider config.Provider
+// updateSplash handles a key press on the provider selection screen.
+func (m *Model) updateSplash(key string) tea.Cmd {
+	switch key {
+	case "q":
+		return tea.Quit
+	case "enter":
+		if len(m.providers) == 0 {
+			return nil
+		}
+		return m.selectProvider(m.providers[m.providerList.cursor])
+	default:
+		// Every provider is on screen, so a page is the whole list.
+		m.providerList.handleKey(key, len(m.providers), len(m.providers))
+	}
+	return nil
 }
 
-func (p providerItem) FilterValue() string { return p.provider.Name }
-
-// providerDelegate renders items in the provider list.
-type providerDelegate struct{}
-
-func (d providerDelegate) Height() int                             { return 2 }
-func (d providerDelegate) Spacing() int                            { return 0 }
-func (d providerDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
-
-func (d providerDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
-	pi, ok := item.(providerItem)
-	if !ok {
-		return
+// providerListWidth is wide enough for the longest description and its
+// 4-column indent.
+func (m Model) providerListWidth() int {
+	width := minProviderListWidth
+	for _, p := range m.providers {
+		width = max(width, lipgloss.Width(p.Description)+4, lipgloss.Width(p.Name)+2)
 	}
+	return width
+}
 
-	selected := index == m.Index()
+// providerRow draws one provider as two lines: its name and its description.
+func providerRow(p config.Provider, selected bool, width int) string {
 	base := lipgloss.NewStyle()
 	if selected {
 		base = selectedStyle
@@ -52,82 +58,38 @@ func (d providerDelegate) Render(w io.Writer, m list.Model, index int, item list
 		descStyle = descStyle.Foreground(colorGray)
 	}
 
-	// Pad to full width
-	availWidth := m.Width()
-	name := nameStyle.Width(availWidth).Render(truncateString(pi.provider.Name, availWidth-2))
-	desc := descStyle.Width(availWidth).Render(truncateString(pi.provider.Description, availWidth-4))
-
-	fmt.Fprintf(w, "%s\n%s", name, desc)
+	// Pad each line to the full width so the selection highlight is a bar.
+	name := nameStyle.Width(width).Render(truncateString(p.Name, width-2))
+	desc := descStyle.Width(width).Render(truncateString(p.Description, width-4))
+	return name + "\n" + desc
 }
 
-type splashModel struct {
-	providerList list.Model
-	width        int
-	height       int
-}
-
-func newSplashModel(providers []config.Provider) splashModel {
-	items := make([]list.Item, len(providers))
-	for i, p := range providers {
-		items[i] = providerItem{provider: p}
-	}
-
-	// Wide enough for the longest description and its 4-column indent.
-	width := minProviderListWidth
-	for _, p := range providers {
-		width = max(width, lipgloss.Width(p.Description)+4, lipgloss.Width(p.Name)+2)
-	}
-
-	l := newList(providerDelegate{}, width, len(providers)*2)
-	l.SetItems(items)
-	return splashModel{providerList: l}
-}
-
-func (s *splashModel) setSize(width, height int) {
-	s.width = width
-	s.height = height
-}
-
-func (s splashModel) Update(msg tea.Msg) (splashModel, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "q":
-			return s, tea.Quit
-		case "?":
-			return s, func() tea.Msg { return showHelpMsg{} }
-		case "enter":
-			if item, ok := s.providerList.SelectedItem().(providerItem); ok {
-				return s, func() tea.Msg { return providerSelectedMsg{provider: item.provider} }
-			}
-			return s, nil
-		}
-	}
-
-	// Forward all other messages (j/k/up/down) to the list
-	var cmd tea.Cmd
-	s.providerList, cmd = s.providerList.Update(msg)
-	return s, cmd
-}
-
-func (s splashModel) View() string {
+func (m Model) viewSplash() string {
 	// Banner
 	banner := bannerStyle.Render(knewsBanner)
-	banner = lipgloss.PlaceHorizontal(s.width, lipgloss.Center, banner)
+	banner = lipgloss.PlaceHorizontal(m.width, lipgloss.Center, banner)
 
 	// Prompt
-	prompt := lipgloss.PlaceHorizontal(s.width, lipgloss.Center, "Select a news provider:")
+	prompt := lipgloss.PlaceHorizontal(m.width, lipgloss.Center, "Select a news provider:")
 
 	// Provider list (centered)
-	listView := lipgloss.PlaceHorizontal(s.width, lipgloss.Center, s.providerList.View())
+	listWidth := m.providerListWidth()
+	rows := make([]string, len(m.providers))
+	for i, p := range m.providers {
+		rows[i] = providerRow(p, i == m.providerList.cursor, listWidth)
+	}
+	list := strings.Join(rows, "\n")
+	if len(rows) == 0 {
+		list = emptyListText
+	}
+	listView := lipgloss.PlaceHorizontal(m.width, lipgloss.Center, list)
 
 	// Status bar
-	status := statusText(" ", "Enter", " Select  ", "?", " Help  ", "q", " Quit")
-
+	status := " " + keyHint("Enter", "Select") + "  " + keyHint("?", "Help") + "  " + keyHint("q", "Quit")
 	statusBox := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(colorGray).
-		Width(s.width - 2).
+		Width(max(m.width-2, 1)).
 		Render(status)
 
 	// Compose vertically
@@ -140,10 +102,10 @@ func (s splashModel) View() string {
 	)
 
 	// Center content vertically, then add status bar at bottom
-	contentHeight := max(s.height-lipgloss.Height(statusBox), 0)
-	centeredContent := lipgloss.Place(s.width, contentHeight, lipgloss.Center, lipgloss.Center, content)
+	contentHeight := max(m.height-lipgloss.Height(statusBox), 0)
+	centeredContent := lipgloss.Place(m.width, contentHeight, lipgloss.Center, lipgloss.Center, content)
 
 	view := lipgloss.JoinVertical(lipgloss.Left, centeredContent, statusBox)
 	// Clip rather than overflow on terminals too small for the banner.
-	return lipgloss.NewStyle().MaxWidth(s.width).MaxHeight(s.height).Render(view)
+	return lipgloss.NewStyle().MaxWidth(m.width).MaxHeight(m.height).Render(view)
 }
